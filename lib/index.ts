@@ -20,8 +20,12 @@ server.tool(
   'List actionable Omniboard checks that currently have results for the resolved project.',
   {},
   async () => {
-    const result = await listActionableChecks();
-    return asJsonContent(result);
+    try {
+      const result = await listActionableChecks();
+      return asJsonContent(result);
+    } catch (error) {
+      return asErrorContent(error);
+    }
   }
 );
 
@@ -32,8 +36,12 @@ server.tool(
     name: z.string().min(1),
   },
   async ({ name }) => {
-    const result = await getActionableCheckResults(name);
-    return asJsonContent(result);
+    try {
+      const result = await getActionableCheckResults(name);
+      return asJsonContent(result);
+    } catch (error) {
+      return asErrorContent(error);
+    }
   }
 );
 
@@ -50,6 +58,18 @@ function asJsonContent(data: unknown) {
       {
         type: 'text' as const,
         text: JSON.stringify(data, null, 2),
+      },
+    ],
+  };
+}
+
+function asErrorContent(error: unknown) {
+  return {
+    isError: true,
+    content: [
+      {
+        type: 'text' as const,
+        text: error instanceof Error ? error.message : String(error),
       },
     ],
   };
