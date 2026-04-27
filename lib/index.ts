@@ -7,7 +7,6 @@ import { z } from 'zod';
 import { createApiService } from './services/api.service.js';
 import {
   getActionableCheckResults,
-  initializeActionableChecksService,
   listActionableChecks,
 } from './services/actionable-checks.service.js';
 
@@ -40,7 +39,6 @@ server.tool(
 
 async function main() {
   createApiService();
-  await initializeActionableChecksService();
 
   const transport = new StdioServerTransport();
   await server.connect(transport);
