@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.1.5](https://github.com/omniboard-dev/mcp/compare/v0.1.4...v0.1.5) (2026-04-27)
+
+
+### Bug Fixes
+
+* startup robustness ([d97fd5e](https://github.com/omniboard-dev/mcp/commit/d97fd5ef048902f85fe40713653ab7a97cd9152c))
+
 ### [0.1.4](https://github.com/omniboard-dev/mcp/compare/v0.1.3...v0.1.4) (2026-04-27)
 
 
