@@ -24,19 +24,43 @@ export function findFiles(
 
   while (stack.length > 0) {
     const currentPath = stack.pop() as string;
-    const paths = fs
-      .readdirSync(currentPath)
-      .map((nextPath) => p.join(currentPath, nextPath));
-    const dirs = paths.filter(
-      (nextPath) =>
-        !excludeRegexp.test(nextPath) && fs.lstatSync(nextPath).isDirectory()
-    );
-    const files = paths.filter(
-      (nextPath) =>
-        !excludeRegexp.test(nextPath) &&
-        fs.lstatSync(nextPath).isFile() &&
-        includeRegexp.test(nextPath.replace(/\\/g, '/'))
-    );
+    let paths: string[];
+
+    try {
+      paths = fs
+        .readdirSync(currentPath)
+        .map((nextPath) => p.join(currentPath, nextPath));
+    } catch {
+      continue;
+    }
+
+    const dirs = [];
+    const files = [];
+
+    for (const nextPath of paths) {
+      const normalizedPath = nextPath.replace(/\\/g, '/');
+      if (excludeRegexp.test(normalizedPath)) {
+        continue;
+      }
+
+      let stat: fs.Stats;
+      try {
+        stat = fs.lstatSync(nextPath);
+      } catch {
+        continue;
+      }
+
+      if (stat.isSymbolicLink()) {
+        continue;
+      }
+
+      if (stat.isDirectory()) {
+        dirs.push(nextPath);
+      } else if (stat.isFile() && includeRegexp.test(normalizedPath)) {
+        files.push(nextPath);
+      }
+    }
+
     results.push(...files);
     stack.push(...dirs);
   }
@@ -49,6 +73,14 @@ export function readJson(path: string) {
     return JSON.parse(buffer.toString());
   } catch (err) {
     return undefined;
+  }
+}
+
+export function fileExists(path: string) {
+  try {
+    return fs.existsSync(path) && fs.lstatSync(path).isFile();
+  } catch {
+    return false;
   }
 }
 

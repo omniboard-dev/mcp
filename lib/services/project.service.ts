@@ -7,6 +7,7 @@ import {
 } from '../interface.js';
 import {
   currentFolderName,
+  fileExists,
   findFiles,
   readFile,
   readJson,
@@ -14,7 +15,8 @@ import {
 } from './fs.service.js';
 import { getCurrentBranch } from './git.service.js';
 
-const PROJECT_INFO_TASK_EXCLUDE_PATTERN = '(^\\.|node_modules|coverage|dist)';
+const PROJECT_INFO_TASK_EXCLUDE_PATTERN =
+  '(^\\.|node_modules|coverage|dist|build|target|out|\\.gradle|\\.mvn|\\.angular|\\.nx|\\.turbo|\\.venv|venv|__pycache__|site-packages|\\.tox|\\.pytest_cache)';
 const PROJECT_INFO_TASK_PATTERN_FLAGS = 'i';
 
 export const isMavenWorkspace = (): boolean => {
@@ -142,6 +144,18 @@ export const findProjectNameCustomProjectResolver = (
 export async function resolveProjectInfo(
   customProjectResolvers: CustomProjectResolver[] = []
 ): Promise<ProjectInfo> {
+  const rootPackageJson = readJson('package.json');
+  if (rootPackageJson?.name) {
+    return addRepositoryInfo(
+      {
+        type: ProjectType.NPM,
+        name: rootPackageJson.name,
+        names: [rootPackageJson.name],
+      },
+      { includeMavenRepositories: false }
+    );
+  }
+
   let names: string[] = [];
   let info: ProjectInfo | undefined;
 
@@ -195,9 +209,21 @@ export async function resolveProjectInfo(
     throw new Error('No project name could be resolved for current workspace');
   }
 
-  const repos = findProjectRepositoriesRepo(true);
-  const reposNpm = findProjectRepositoriesNpm(true);
-  const reposMaven = findProjectRepositoriesMaven(true);
+  return addRepositoryInfo(info, { includeMavenRepositories: true });
+}
+
+async function addRepositoryInfo(
+  info: ProjectInfo,
+  options: { includeMavenRepositories: boolean }
+): Promise<ProjectInfo> {
+  const rootPackageJson = readJson('package.json');
+  const repos = findProjectRepositoriesRepoRoot(true);
+  const reposNpm = rootPackageJson?.repository?.url
+    ? [sanitizeRepositoryUrl(rootPackageJson.repository.url, true)]
+    : [];
+  const reposMaven = options.includeMavenRepositories
+    ? findProjectRepositoriesMaven(true)
+    : [];
   const repositories = Array.from(
     new Set([...repos, ...reposNpm, ...reposMaven])
   );
@@ -209,6 +235,20 @@ export async function resolveProjectInfo(
     repository: repositories[0],
     repositories,
   };
+}
+
+function findProjectRepositoriesRepoRoot(sanitizeRepoUrl: boolean): string[] {
+  const gitConfigPath = '.git/config';
+  if (!fileExists(gitConfigPath)) {
+    return [];
+  }
+
+  const gitConfig = readFile(gitConfigPath);
+  const repoUrl = /\[remote.?["']origin["']\]\n\s*url\s?=\s?(?<url>.*)/.exec(
+    gitConfig
+  )?.groups?.url;
+
+  return repoUrl ? [sanitizeRepositoryUrl(repoUrl, sanitizeRepoUrl)] : [];
 }
 
 function findPackageJsonFiles() {

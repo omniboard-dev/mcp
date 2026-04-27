@@ -29,7 +29,9 @@ export function createApiService() {
   }
 
   apiKey = key;
-  apiUrl = process.env.OMNIBOARD_API_URL ?? DEFAULT_API_URL;
+  apiUrl = process.argv.includes('--dev')
+    ? 'http://localhost:8080'
+    : process.env.OMNIBOARD_API_URL ?? DEFAULT_API_URL;
 }
 
 export const getSettings = (): Promise<Settings> =>
