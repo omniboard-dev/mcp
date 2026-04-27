@@ -1,0 +1,63 @@
+#!/usr/bin/env node
+
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { z } from 'zod';
+
+import { createApiService } from './services/api.service.js';
+import {
+  getActionableCheckResults,
+  initializeActionableChecksService,
+  listActionableChecks,
+} from './services/actionable-checks.service.js';
+
+const server = new McpServer({
+  name: '@omniboard/mcp',
+  version: '1.0.0',
+});
+
+server.tool(
+  'omniboard_list_actionable_checks',
+  'List actionable Omniboard checks that currently have results for the resolved project.',
+  {},
+  async () => {
+    const result = await listActionableChecks();
+    return asJsonContent(result);
+  }
+);
+
+server.tool(
+  'omniboard_get_actionable_check_results',
+  'Get actionable prompt and check results for an actionable Omniboard check by name.',
+  {
+    name: z.string().min(1),
+  },
+  async ({ name }) => {
+    const result = await getActionableCheckResults(name);
+    return asJsonContent(result);
+  }
+);
+
+async function main() {
+  createApiService();
+  await initializeActionableChecksService();
+
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
+}
+
+function asJsonContent(data: unknown) {
+  return {
+    content: [
+      {
+        type: 'text' as const,
+        text: JSON.stringify(data, null, 2),
+      },
+    ],
+  };
+}
+
+main().catch((error) => {
+  console.error(error instanceof Error ? error.message : error);
+  process.exit(1);
+});

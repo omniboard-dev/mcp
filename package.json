@@ -1,10 +1,36 @@
 {
   "name": "@omniboard/mcp",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "type": "module",
   "main": "dist/index.js",
+  "bin": {
+    "omniboard-mcp": "./dist/index.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node dist/index.js",
+    "dev": "node --loader ts-node/esm lib/index.ts",
+    "build": "tsc",
+    "watch": "tsc --watch",
+    "format:test": "prettier lib/**/*.{ts,json} package.json tsconfig.json",
+    "format:write": "prettier lib/**/*.{ts,json} package.json tsconfig.json --write",
+    "release": "npm run format:write && npm run build && standard-version -a && git push --follow-tags origin main && npm publish --access public"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.17.4",
+    "xpath": "0.0.32",
+    "xmldom": "^0.6.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.11",
+    "@types/xmldom": "^0.1.34",
+    "prettier": "^2.8.8",
+    "standard-version": "^9.5.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.2"
   },
   "description": "Omniboard.dev MCP server that turns actionable checks triggered for the current project into agent-driven fixes, refactors, and improvements that happen automatically.",
   "keywords": [
