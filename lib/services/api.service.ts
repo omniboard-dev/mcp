@@ -75,6 +75,10 @@ async function request<T>(
   endpoint: string,
   init: RequestInit & { query?: Record<string, string> } = {}
 ): Promise<T> {
+  if (!apiKey || !apiUrl) {
+    createApiService();
+  }
+
   const url = new URL(endpoint, `${apiUrl}/`);
   Object.entries(init.query ?? {}).forEach(([key, value]) => {
     url.searchParams.set(key, value);
