@@ -1,0 +1,26 @@
+{
+  "name": "@omniboard/mcp",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "description": "Omniboard.dev MCP server that turns actionable checks triggered for the current project into agent-driven fixes, refactors, and improvements that happen automatically.",
+  "keywords": [
+    "omniboard.dev",
+    "mcp",
+    "ai",
+    "tooling"
+  ],
+  "license": "MIT",
+  "author": "Tomas Trajan <@tomastrajan>",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/omniboard-dev/mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/omniboard-dev/mcp/issues"
+  },
+  "homepage": "https://github.com/omniboard-dev/mcp#readme"
+}
