@@ -9,32 +9,17 @@ API for actionable check results for that project.
 
 ## Environment
 
-Required:
+`OMNIBOARD_API_KEY_MCP` is required and should be passed through the MCP client
+configuration, not assumed from the shell that starts the agent.
 
-```sh
-OMNIBOARD_API_KEY_MCP=...
-```
+### Optional
 
-The MCP server expects this environment variable to be set before the agent is
-started. The API key must be an Omniboard API key that is allowed to access the
-MCP endpoints.
-
-Optional:
-
-```sh
-OMNIBOARD_API_URL=https://api.omniboard.dev
-```
+`OMNIBOARD_API_URL` is optional and defaults to `https://api.omniboard.dev` 
 
 ## Registering The MCP Server
 
-The server uses the standard MCP stdio transport. Build the package first:
-
-```sh
-npm install
-npm run build
-```
-
-Then register the built executable with your MCP client.
+The server uses the standard MCP stdio transport. Configure your agent to run
+the package with `npx` and pass `OMNIBOARD_API_KEY_MCP` in the MCP server env.
 
 ### Generic stdio config
 
@@ -45,7 +30,7 @@ Use this shape for clients that accept MCP server JSON configuration:
   "mcpServers": {
     "omniboard": {
       "command": "npx",
-      "args": ["@omniboard/mcp"],
+      "args": ["-y", "@omniboard/mcp"],
       "env": {
         "OMNIBOARD_API_KEY_MCP": "your-api-key"
       }
@@ -54,70 +39,54 @@ Use this shape for clients that accept MCP server JSON configuration:
 }
 ```
 
-For local development from a checkout:
+### Codex `config.toml`
+
+Add this to `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.omniboard]
+command = "npx"
+args = ["-y", "@omniboard/mcp"]
+startup_timeout_sec = 30
+
+[mcp_servers.omniboard.env]
+OMNIBOARD_API_KEY_MCP = "your-api-key"
+```
+
+### Claude Desktop
+
+Add this to your Claude Desktop MCP config:
 
 ```json
 {
   "mcpServers": {
     "omniboard": {
-      "command": "node",
-      "args": ["/absolute/path/to/mcp/dist/index.js"],
+      "command": "npx",
+      "args": ["-y", "@omniboard/mcp"],
       "env": {
-        "OMNIBOARD_API_KEY_MCP": "your-api-key",
-        "OMNIBOARD_API_URL": "https://api.omniboard.dev"
+        "OMNIBOARD_API_KEY_MCP": "your-api-key"
       }
     }
   }
 }
 ```
 
-### Codex `config.toml`
+### Cursor
 
-Add an MCP server entry to your Codex config:
+Add this to your Cursor MCP config:
 
-```toml
-[mcp_servers.omniboard]
-command = "npx"
-args = ["@omniboard/mcp"]
-
-[mcp_servers.omniboard.env]
-OMNIBOARD_API_KEY_MCP = "your-api-key"
-```
-
-For local development from a checkout:
-
-```toml
-[mcp_servers.omniboard]
-command = "node"
-args = ["/absolute/path/to/mcp/dist/index.js"]
-
-[mcp_servers.omniboard.env]
-OMNIBOARD_API_KEY_MCP = "your-api-key"
-OMNIBOARD_API_URL = "https://api.omniboard.dev"
-```
-
-Alternatively, set `OMNIBOARD_API_KEY_MCP` in the shell environment before
-starting the agent and omit the `env` block from the client config.
-
-Bash:
-
-```sh
-export OMNIBOARD_API_KEY_MCP="your-api-key"
-codex
-```
-
-Fish:
-
-```fish
-set -x OMNIBOARD_API_KEY_MCP "your-api-key"
-codex
-```
-
-PowerShell:
-
-```powershell
-$env:OMNIBOARD_API_KEY_MCP = "your-api-key"
-codex
+```json
+{
+  "mcpServers": {
+    "omniboard": {
+      "command": "npx",
+      "args": ["-y", "@omniboard/mcp"],
+      "env": {
+        "OMNIBOARD_API_KEY_MCP": "your-api-key"
+      }
+    }
+  }
+}
 ```
 
 ## Tools
@@ -127,110 +96,8 @@ codex
 Returns the actionable checks that currently have results for the resolved
 project.
 
-Response:
-
-```json
-{
-  "project": {
-    "id": 1,
-    "name": "example-project",
-    "lastAnalysisDate": "2026-04-27T12:00:00.000Z"
-  },
-  "checks": [
-    {
-      "name": "UXF",
-      "type": "content",
-      "description": "UXF usage detected",
-      "prompt": "Update the matched usages...",
-      "value": true
-    }
-  ]
-}
-```
 
 ### `omniboard_get_actionable_check_results`
 
-Input:
-
-```json
-{
-  "name": "UXF"
-}
-```
-
 Returns the result context for the check. The API owns the result DTO, so the
 MCP passes it through as `result`.
-
-Response:
-
-```json
-{
-  "project": {
-    "id": 1,
-    "name": "example-project"
-  },
-  "check": {
-    "name": "UXF",
-    "type": "content",
-    "description": "UXF usage detected",
-    "actionable": true,
-    "prompt": "Update the matched usages..."
-  },
-  "result": {}
-}
-```
-
-## Backend Endpoints
-
-### Checks
-
-```http
-GET /mcp/checks?projectName=example-project
-```
-
-Expected response:
-
-```json
-{
-  "project": {
-    "id": 1,
-    "name": "example-project",
-    "lastAnalysisDate": "2026-04-27T12:00:00.000Z"
-  },
-  "checks": [
-    {
-      "name": "UXF",
-      "type": "content",
-      "description": "UXF usage detected",
-      "actionable": true,
-      "prompt": "Update the matched usages...",
-      "value": true
-    }
-  ]
-}
-```
-
-### Result
-
-```http
-GET /mcp/result?projectName=example-project&checkName=UXF
-```
-
-Expected response:
-
-```json
-{
-  "project": {
-    "id": 1,
-    "name": "example-project"
-  },
-  "check": {
-    "name": "UXF",
-    "type": "content",
-    "description": "UXF usage detected",
-    "actionable": true,
-    "prompt": "Update the matched usages..."
-  },
-  "result": {}
-}
-```
