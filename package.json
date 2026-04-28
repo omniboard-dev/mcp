@@ -14,9 +14,10 @@
     "dev": "node --loader ts-node/esm lib/index.ts",
     "build": "tsc",
     "watch": "tsc --watch",
-    "format:test": "prettier lib/**/*.{ts,json} package.json tsconfig.json",
-    "format:write": "prettier lib/**/*.{ts,json} package.json tsconfig.json --write",
-    "release": "npm run format:write && npm run build && standard-version -a && git push --follow-tags origin main && npm publish --access public"
+    "format:test": "prettier lib/**/*.{ts,json} tooling/**/*.js package.json tsconfig.json",
+    "format:write": "prettier lib/**/*.{ts,json} tooling/**/*.js package.json tsconfig.json --write",
+    "sync:dist-version": "node tooling/sync-dist-version.js",
+    "release": "npm run format:write && npm run build && standard-version -a && npm run sync:dist-version && git push --follow-tags origin main && npm publish --access public"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.17.4",

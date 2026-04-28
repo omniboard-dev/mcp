@@ -12,12 +12,6 @@ let projectCache: ProjectInfo | undefined;
 let checksCache: ActionableChecksResponse | undefined;
 const resultCache = new Map<string, ActionableCheckResultResponse>();
 
-export async function initializeActionableChecksService() {
-  settingsCache = await api.getSettings();
-  projectCache = await resolveProjectInfo(settingsCache.customProjectResolvers);
-  validateProjectAllowed(projectCache, settingsCache);
-}
-
 export async function listActionableChecks() {
   const data = await getActionableChecks();
 
@@ -47,10 +41,26 @@ export async function getActionableCheckResults(name: string) {
   }
 
   if (!resultCache.has(name)) {
-    resultCache.set(
-      name,
-      await api.getActionableCheckResult(await getProject(), name)
-    );
+    const result = await api.getActionableCheckResult(await getProject(), name);
+    resultCache.set(name, {
+      ...result,
+      agentContext: {
+        goal: `Resolve actionable Omniboard check "${name}" for this project.`,
+        instructions: [
+          'Use the check metadata, prompt, and result details as the primary context for the change.',
+          'Inspect the local codebase before editing and make the smallest coherent change that resolves the actionable check.',
+          'After changing the code, run the relevant project build, test, or lint command when available.',
+          'If `OMNIBOARD_API_KEY` is available, optionally run the `omniboard_validate_actionable_check_fix` tool for this check to confirm whether it still matches.',
+          'If `OMNIBOARD_API_KEY` is not available, skip analyzer validation and report that it was skipped.',
+        ],
+        validation: {
+          optional: true,
+          requiredEnv: 'OMNIBOARD_API_KEY',
+          tool: 'omniboard_validate_actionable_check_fix',
+          skipWhenMissingEnv: true,
+        },
+      },
+    });
   }
 
   return resultCache.get(name)!;

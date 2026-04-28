@@ -73,4 +73,31 @@ export interface ActionableCheckResultResponse {
   project: Pick<McpApiProject, 'id' | 'name'>;
   check: McpApiCheck;
   result: unknown;
+  agentContext?: ActionableCheckAgentContext;
+}
+
+export interface ActionableCheckAgentContext {
+  goal: string;
+  instructions: string[];
+  validation: {
+    optional: boolean;
+    requiredEnv: 'OMNIBOARD_API_KEY';
+    tool: 'omniboard_validate_actionable_check_fix';
+    skipWhenMissingEnv: boolean;
+  };
+}
+
+export interface ActionableCheckValidationResponse {
+  checkName: string;
+  skipped: boolean;
+  skipReason?: string;
+  command: string;
+  outputPath: string;
+  value?: boolean;
+  stillMatches?: boolean;
+  resolved?: boolean;
+  result?: unknown;
+  stdout?: string;
+  stderr?: string;
+  generatedJsonCleanedUp: boolean;
 }
