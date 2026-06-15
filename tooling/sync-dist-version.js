@@ -4,10 +4,7 @@ const packageJson = JSON.parse(fs.readFileSync('package.json', 'utf8'));
 const distIndexPath = 'dist/index.js';
 const distIndex = fs.readFileSync(distIndexPath, 'utf8');
 const expectedVersion = `version: '${packageJson.version}'`;
-const nextDistIndex = distIndex.replace(
-  "version: 'VERSION'",
-  expectedVersion
-);
+const nextDistIndex = distIndex.replace("version: 'VERSION'", expectedVersion);
 
 if (nextDistIndex === distIndex) {
   if (distIndex.includes(expectedVersion)) {
