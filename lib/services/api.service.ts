@@ -3,6 +3,7 @@ import {
   DEFAULT_API_URL,
   MCP_CHECKS_ENDPOINT,
   MCP_RUN_ENDPOINT,
+  MCP_MATCHED_PROJECTS_ENDPOINT,
   SETTINGS_ENDPOINT,
 } from '../consts.js';
 import {
@@ -10,8 +11,11 @@ import {
   AgenticRunProgressUpsertResponse,
   AgenticRunResponse,
   AgenticRunsResponse,
+  AgenticRunMatchedProjectsResponse,
   McpApiAgenticRun,
   McpApiChecksResponse,
+  McpApiMatchedProject,
+  McpApiMatchedProjectsResponse,
   McpApiProject,
   McpApiRunResponse,
   ProjectInfo,
@@ -97,6 +101,48 @@ export const getAgenticRun = async (
     project: response.project,
     run,
     result: response.result,
+  };
+};
+
+export const getAgenticRunMatchedProjects = async ({
+  checkName,
+  runKey,
+}: {
+  checkName?: string;
+  runKey?: string;
+}): Promise<AgenticRunMatchedProjectsResponse> => {
+  const response = await request<McpApiMatchedProjectsResponse>(
+    MCP_MATCHED_PROJECTS_ENDPOINT,
+    {
+      query: {
+        checkName,
+        runKey,
+      },
+    }
+  );
+  const runs = normalizeAgenticRunsResponse(
+    response.runs ?? [],
+    response.check.name
+  ).map((run) => ({
+    ...run,
+    check: run.check ?? response.check,
+  }));
+  const run = response.run
+    ? normalizeAgenticRunSummary(
+        {
+          ...response.run,
+          check: response.run.check ?? response.check,
+        },
+        response.check.name
+      )
+    : null;
+
+  return {
+    check: response.check,
+    run: run ? { ...run, check: run.check ?? response.check } : null,
+    runs,
+    projects: (response.projects ?? []).map(normalizeMatchedProject),
+    total: response.total ?? response.projects?.length ?? 0,
   };
 };
 
@@ -214,5 +260,18 @@ function normalizeApiProject(
     id: project?.id ?? 0,
     name: project?.name ?? fallbackName,
     lastAnalysisDate: project?.lastAnalysisDate,
+  };
+}
+
+function normalizeMatchedProject(
+  project: McpApiMatchedProject
+): McpApiMatchedProject {
+  return {
+    id: project.id,
+    name: project.name,
+    lastAnalysisDate: project.lastAnalysisDate ?? null,
+    updateDate: project.updateDate ?? null,
+    value: project.value ?? null,
+    result: project.result ?? null,
   };
 }

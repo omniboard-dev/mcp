@@ -2,6 +2,7 @@ import {
   AgenticRunProgressReportResult,
   AgenticRunProgressStatus,
   AgenticRunProgressUpsertInput,
+  AgenticRunMatchedProjectsResponse,
   AgenticRunResponse,
   AgenticRunsResponse,
   AgenticRunSummary,
@@ -27,10 +28,26 @@ export interface ReportAgenticRunProgressOptions {
   metadata?: Record<string, unknown> | null;
 }
 
+export interface ListAgenticRunProjectsOptions {
+  checkName?: string;
+  runKey?: string;
+}
+
 export async function listAgenticRuns(
   checkName?: string
 ): Promise<AgenticRunsResponse> {
   return api.getAgenticRuns(await getOmniboardProject(), checkName);
+}
+
+export async function listAgenticRunProjects({
+  checkName,
+  runKey,
+}: ListAgenticRunProjectsOptions): Promise<AgenticRunMatchedProjectsResponse> {
+  if (!checkName && !runKey) {
+    throw new Error('Either checkName or runKey is required.');
+  }
+
+  return api.getAgenticRunMatchedProjects({ checkName, runKey });
 }
 
 export async function getAgenticRun(

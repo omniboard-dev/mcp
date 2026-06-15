@@ -59,6 +59,23 @@ export interface McpApiRunResponse {
   result: unknown;
 }
 
+export interface McpApiMatchedProject {
+  id: number;
+  name: string;
+  lastAnalysisDate?: string | Date | null;
+  updateDate?: string | Date | null;
+  value?: boolean | string | null;
+  result?: unknown;
+}
+
+export interface McpApiMatchedProjectsResponse {
+  check: McpApiCheck;
+  run: McpApiAgenticRun | null;
+  runs: McpApiAgenticRun[];
+  projects: McpApiMatchedProject[];
+  total: number;
+}
+
 export interface McpApiAgenticRun {
   runKey?: string;
   key?: string;
@@ -118,6 +135,23 @@ export interface AgenticRunResponse {
   result?: unknown;
   agentContext?: AgenticRunAgentContext;
   progressReport?: AgenticRunProgressReportResult;
+}
+
+export interface AgenticRunMatchedProject {
+  id: number;
+  name: string;
+  lastAnalysisDate?: string | Date | null;
+  updateDate?: string | Date | null;
+  value?: boolean | string | null;
+  result?: unknown;
+}
+
+export interface AgenticRunMatchedProjectsResponse {
+  check: McpApiCheck;
+  run: AgenticRunSummary | null;
+  runs: AgenticRunSummary[];
+  projects: AgenticRunMatchedProject[];
+  total: number;
 }
 
 export interface AgenticRunSummary {

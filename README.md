@@ -1,12 +1,17 @@
 # Omniboard.dev MCP
 
-MCP server that exposes Omniboard agentic check runs for the current project to
-a local agent.
+MCP server that exposes Omniboard agentic check runs to a local agent.
 
-The server resolves the current project name using the same project-resolution
-approach as `@omniboard/analyzer`, retrieves Omniboard settings, then asks the
-API for agentic runs. One agentic run is one prompt plus tracked progress.
-Progress reports use `runKey`.
+The server supports two workflows:
+
+- Project mode resolves the current project name using the same
+  project-resolution approach as `@omniboard/analyzer`, then asks the API for
+  active agentic runs matching that project.
+- Discovery mode lists all Omniboard projects matching a given check or run
+  without resolving the current workspace and without reporting progress.
+
+One agentic run is one prompt plus tracked progress. Progress reports use
+`runKey`.
 
 ## Environment
 
@@ -24,7 +29,8 @@ to run `@omniboard/analyzer` during the validation prompt.
 ## API Contract
 
 The MCP client reads project-scoped runs from `mcp/checks` and `mcp/run`, then
-reports progress to `agentic-check-run-progress`.
+reads discovery lists from `mcp/matched-projects`, and reports progress to
+`agentic-check-run-progress`.
 
 ## Registering The MCP Server
 
@@ -68,10 +74,20 @@ OMNIBOARD_API_KEY = "your-api-key" # optional, enables analyzer validation
 
 ## Tools
 
+### Project Mode
+
 ### `omniboard_list_agentic_runs`
 
-Lists agentic runs for the resolved project. Pass `checkName` to scope the list
-to one agentic check.
+Lists agentic runs for the resolved current project. Pass `checkName` to scope
+the list to one agentic check.
+
+### Discovery Mode
+
+### `omniboard_list_agentic_run_projects`
+
+Lists Omniboard projects that currently match an agentic check or run. Pass
+`runKey` to target one run, or `checkName` to discover matching projects and all
+active runs for that check. This tool is read-only and does not report progress.
 
 ### `omniboard_get_agentic_run`
 
