@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.1.9](https://github.com/omniboard-dev/mcp/compare/v0.1.8...v0.1.9) (2026-06-15)
+
+
+### Features
+
+* find all projects matched for the agentic check ([1675ab8](https://github.com/omniboard-dev/mcp/commit/1675ab815be4ced1c17d32fdf2938b2a2fa79083))
+
 ### [0.1.8](https://github.com/omniboard-dev/mcp/compare/v0.1.7...v0.1.8) (2026-06-15)
 
 
