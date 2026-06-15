@@ -1,23 +1,30 @@
 # Omniboard.dev MCP
 
-MCP server that exposes actionable Omniboard checks for the current project to a
-local agent.
+MCP server that exposes Omniboard agentic check runs for the current project to
+a local agent.
 
 The server resolves the current project name using the same project-resolution
 approach as `@omniboard/analyzer`, retrieves Omniboard settings, then asks the
-API for actionable check results for that project.
+API for agentic runs. One agentic run is one prompt plus tracked progress.
+Progress reports use `runKey`.
 
 ## Environment
 
 `OMNIBOARD_API_KEY_MCP` is required and should be passed through the MCP client
-configuration, not assumed from the shell that starts the agent.
+configuration, not assumed from the shell that starts the agent. The key is
+used to read agentic check runs and to write agentic run progress.
 
 ### Optional
 
 `OMNIBOARD_API_URL` is optional and defaults to `https://api.omniboard.dev`
 
 `OMNIBOARD_API_KEY` is optional. Provide it only when agents should be allowed
-to run `@omniboard/analyzer` during the actionable-check validation prompt.
+to run `@omniboard/analyzer` during the validation prompt.
+
+## API Contract
+
+The MCP client reads project-scoped runs from `mcp/checks` and `mcp/run`, then
+reports progress to `agentic-check-run-progress`.
 
 ## Registering The MCP Server
 
@@ -61,32 +68,34 @@ OMNIBOARD_API_KEY = "your-api-key" # optional, enables analyzer validation
 
 ## Tools
 
-### `omniboard_list_actionable_checks`
+### `omniboard_list_agentic_runs`
 
-Returns the actionable checks that currently have results for the resolved
-project.
+Lists agentic runs for the resolved project. Pass `checkName` to scope the list
+to one agentic check.
 
-### `omniboard_get_actionable_check_results`
+### `omniboard_get_agentic_run`
 
-Returns the result context for the check. The API owns the result DTO, so the
-MCP passes it through as `result`. The response also includes `agentContext`,
-which tells the agent to use all returned context to resolve the actionable
-check, run relevant local verification, and optionally validate with the
-`omniboard_validate_actionable_check_fix` tool when `OMNIBOARD_API_KEY` is
-available.
+Returns one agentic run by `runKey`, including prompt, progress, and agent
+instructions. This also reports the run as `in_progress` idempotently.
 
-### `omniboard_validate_actionable_check_fix`
+### `omniboard_report_agentic_run_progress`
 
-Optionally validates whether an attempted fix resolved an actionable check. When
-`OMNIBOARD_API_KEY` is not available, the tool returns a skipped result and does
-not run validation.
+Reports progress for one agentic run using `runKey`. Use it when a run reaches
+a workflow milestone such as `blocked`, `skipped`, `ready_to_commit`,
+`ready_to_mr`, or `done`. The tool can also send MR URLs, commit SHAs, pipeline
+status, concise errors, notes, verification metadata, and extra metadata.
 
-When the key is available, the tool runs:
+### `omniboard_validate_agentic_run`
+
+Validates one agentic run by `runKey`. The tool resolves the check name from the
+run, reports validation progress to that run, and returns the analyzer result.
+When `OMNIBOARD_API_KEY` is not available, the tool returns a skipped result and
+reports `ready_to_verify`. When the key is available, the tool runs:
 
 ```sh
 npx @omniboard/analyzer --ak <OMNIBOARD_API_KEY> --cp <check-name> --json
 ```
 
-It then inspects the generated JSON at `./dist/omniboard.json`, returns whether
-the check is resolved or still matches, and removes the generated JSON file
-before completing.
+It then inspects `./dist/omniboard.json`, reports `ready_to_commit` when the
+check is resolved or `needs_model_work` when it still matches, and removes the
+generated JSON file before completing.

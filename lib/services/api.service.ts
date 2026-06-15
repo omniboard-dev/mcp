@@ -1,17 +1,19 @@
 import {
+  AGENTIC_CHECK_RUN_PROGRESS_ENDPOINT,
   DEFAULT_API_URL,
   MCP_CHECKS_ENDPOINT,
-  MCP_RESULT_ENDPOINT,
+  MCP_RUN_ENDPOINT,
   SETTINGS_ENDPOINT,
 } from '../consts.js';
 import {
-  ActionableCheckResultResponse,
-  ActionableChecksResponse,
-  ActionableCheckSummary,
-  McpApiCheckResultResponse,
-  McpApiCheckSummary,
+  AgenticRunProgressUpsertInput,
+  AgenticRunProgressUpsertResponse,
+  AgenticRunResponse,
+  AgenticRunsResponse,
+  McpApiAgenticRun,
   McpApiChecksResponse,
   McpApiProject,
+  McpApiRunResponse,
   ProjectInfo,
   Settings,
 } from '../interface.js';
@@ -37,45 +39,83 @@ export function createApiService() {
 export const getSettings = (): Promise<Settings> =>
   request<Settings>(SETTINGS_ENDPOINT);
 
-export const getActionableChecks = async (
-  project: ProjectInfo
-): Promise<ActionableChecksResponse> => {
+export const getAgenticRuns = async (
+  project: ProjectInfo,
+  checkName?: string
+): Promise<AgenticRunsResponse> => {
   const response = await request<McpApiChecksResponse>(MCP_CHECKS_ENDPOINT, {
     query: {
       projectName: project.name,
     },
   });
+  const projectResponse = normalizeApiProject(response.project, project.name);
+  const runs = response.checks
+    .filter((check) => !checkName || check.name === checkName)
+    .flatMap((check) =>
+      normalizeAgenticRunsResponse(check.agenticRuns ?? [], check.name).map(
+        (run) => ({
+          ...run,
+          check: run.check ?? check,
+          project: run.project ?? projectResponse,
+          result: run.result,
+        })
+      )
+    );
 
   return {
-    project: normalizeApiProject(response.project, project.name),
-    checks: normalizeActionableChecksResponse(response.checks),
+    project: projectResponse,
+    runs,
+    total: runs.length,
   };
 };
 
-export const getActionableCheckResult = async (
+export const getAgenticRun = async (
   project: ProjectInfo,
-  checkName: string
-): Promise<ActionableCheckResultResponse> => {
-  const response = await request<McpApiCheckResultResponse>(
-    MCP_RESULT_ENDPOINT,
+  runKey: string
+): Promise<AgenticRunResponse> => {
+  const response = await request<McpApiRunResponse>(MCP_RUN_ENDPOINT, {
+    query: {
+      projectName: project.name,
+      runKey,
+    },
+  });
+  const run = normalizeAgenticRunSummary(
     {
-      query: {
-        projectName: project.name,
-        checkName,
-      },
-    }
+      ...response.run,
+      check: response.run.check ?? response.check,
+      project: response.run.project ?? response.project,
+      result: response.run.result ?? response.result,
+    },
+    response.check.name
   );
+
+  if (!run) {
+    throw new Error(`Agentic run "${runKey}" was not found.`);
+  }
 
   return {
     project: response.project,
-    check: response.check,
+    run,
     result: response.result,
   };
 };
 
+export const upsertAgenticRunProgress = (
+  progress: AgenticRunProgressUpsertInput
+): Promise<AgenticRunProgressUpsertResponse> =>
+  request<AgenticRunProgressUpsertResponse>(
+    AGENTIC_CHECK_RUN_PROGRESS_ENDPOINT,
+    {
+      method: 'PUT',
+      body: JSON.stringify(progress),
+    }
+  );
+
+type QueryValue = string | number | boolean | null | undefined;
+
 async function request<T>(
   endpoint: string,
-  init: RequestInit & { query?: Record<string, string> } = {}
+  init: RequestInit & { query?: Record<string, QueryValue> } = {}
 ): Promise<T> {
   if (!apiKey || !apiUrl) {
     createApiService();
@@ -83,7 +123,9 @@ async function request<T>(
 
   const url = new URL(endpoint, `${apiUrl}/`);
   Object.entries(init.query ?? {}).forEach(([key, value]) => {
-    url.searchParams.set(key, value);
+    if (value !== undefined && value !== null) {
+      url.searchParams.set(key, String(value));
+    }
   });
 
   const { query, ...requestInit } = init;
@@ -113,60 +155,55 @@ async function request<T>(
   return (await response.json()) as T;
 }
 
-function normalizeActionableChecksResponse(
-  response: unknown
-): ActionableCheckSummary[] {
-  if (Array.isArray(response)) {
-    return response
-      .map((check) => normalizeActionableCheckSummary(check))
-      .filter((check): check is ActionableCheckSummary => Boolean(check.name));
-  }
-
-  if (
-    response &&
-    typeof response === 'object' &&
-    Array.isArray((response as { checks?: unknown }).checks)
-  ) {
-    return normalizeActionableChecksResponse(
-      (response as { checks: unknown[] }).checks
-    );
-  }
-
-  if (response && typeof response === 'object') {
-    return Object.entries(response as Record<string, unknown>).map(
-      ([name, check]) =>
-        normalizeActionableCheckSummary({
-          name,
-          ...((check ?? {}) as object),
-        })
-    );
-  }
-
-  return [];
+function normalizeAgenticRunsResponse(
+  response: McpApiAgenticRun[],
+  fallbackCheckName = ''
+) {
+  return response
+    .map((run) => normalizeAgenticRunSummary(run, fallbackCheckName))
+    .filter((run): run is NonNullable<typeof run> => Boolean(run));
 }
 
-function normalizeActionableCheckSummary(
-  check: unknown
-): ActionableCheckSummary {
-  if (typeof check === 'string') {
-    return {
-      name: check,
-      type: 'unknown',
-      description: null,
-      prompt: null,
-      value: null,
-    };
+function normalizeAgenticRunSummary(
+  run: McpApiAgenticRun,
+  fallbackCheckName: string
+) {
+  const runKey = normalizeString(run.runKey ?? run.key ?? run.id);
+
+  if (!runKey) {
+    return undefined;
   }
 
-  const currentCheck = check as Partial<McpApiCheckSummary>;
+  const status = normalizeString(run.status ?? run.progress?.status) ?? null;
+  const checkName =
+    normalizeString(run.checkName ?? run.check?.name) ?? fallbackCheckName;
 
   return {
-    name: currentCheck.name ?? '',
-    type: currentCheck.type ?? 'unknown',
-    description: currentCheck.description ?? null,
-    prompt: currentCheck.prompt ?? null,
-    value: currentCheck.value ?? null,
+    runKey,
+    checkName,
+    check: run.check ?? null,
+    project: run.project ?? null,
+    prompt: normalizeString(run.prompt ?? run.check?.prompt) ?? null,
+    status,
+    progress: run.progress ?? null,
+    result: run.result,
+    isActive: run.isActive ?? run.active ?? status === 'active',
+    creationDate: run.creationDate ?? null,
+    updateDate: run.updateDate ?? null,
+    raw: run,
   };
+}
+
+function normalizeString(value: unknown) {
+  if (typeof value === 'string' && value.length > 0) {
+    return value;
+  }
+
+  if (typeof value === 'number') {
+    return String(value);
+  }
+
+  return undefined;
 }
 
 function normalizeApiProject(

@@ -37,8 +37,10 @@ export interface McpApiCheck {
   name: string;
   type: string;
   description: string | null;
-  actionable: boolean;
+  agentic: boolean;
   prompt: string | null;
+  runKey?: string | null;
+  agenticRuns?: McpApiAgenticRun[];
 }
 
 export interface McpApiCheckSummary extends McpApiCheck {
@@ -50,45 +52,46 @@ export interface McpApiChecksResponse {
   checks: McpApiCheckSummary[];
 }
 
-export interface McpApiCheckResultResponse {
+export interface McpApiRunResponse {
   project: Pick<McpApiProject, 'id' | 'name'>;
   check: McpApiCheck;
+  run: McpApiAgenticRun;
   result: unknown;
 }
 
-export interface ActionableCheckSummary {
-  name: string;
-  type: string;
-  description: string | null;
-  prompt: string | null;
-  value: boolean | null;
+export interface McpApiAgenticRun {
+  runKey?: string;
+  key?: string;
+  id?: string | number;
+  checkName?: string;
+  check?: Partial<McpApiCheck> | null;
+  project?: Partial<McpApiProject> | null;
+  prompt?: string | null;
+  status?: AgenticRunStatus | string | null;
+  progress?: Record<string, unknown> | null;
+  result?: unknown;
+  isActive?: boolean;
+  active?: boolean;
+  creationDate?: string | Date | null;
+  updateDate?: string | Date | null;
+  [key: string]: unknown;
 }
 
-export interface ActionableChecksResponse {
-  project: McpApiProject;
-  checks: ActionableCheckSummary[];
-}
-
-export interface ActionableCheckResultResponse {
-  project: Pick<McpApiProject, 'id' | 'name'>;
-  check: McpApiCheck;
-  result: unknown;
-  agentContext?: ActionableCheckAgentContext;
-}
-
-export interface ActionableCheckAgentContext {
+export interface AgenticRunAgentContext {
   goal: string;
   instructions: string[];
   validation: {
     optional: boolean;
     requiredEnv: 'OMNIBOARD_API_KEY';
-    tool: 'omniboard_validate_actionable_check_fix';
+    tool: 'omniboard_validate_agentic_run';
     skipWhenMissingEnv: boolean;
   };
 }
 
-export interface ActionableCheckValidationResponse {
+export interface AgenticRunValidationResponse {
   checkName: string;
+  runKey: string;
+  run: AgenticRunSummary;
   skipped: boolean;
   skipReason?: string;
   command: string;
@@ -100,4 +103,113 @@ export interface ActionableCheckValidationResponse {
   stdout?: string;
   stderr?: string;
   generatedJsonCleanedUp: boolean;
+  progressReport?: AgenticRunProgressReportResult;
+}
+
+export interface AgenticRunsResponse {
+  project: McpApiProject;
+  runs: AgenticRunSummary[];
+  total: number;
+}
+
+export interface AgenticRunResponse {
+  project: Pick<McpApiProject, 'id' | 'name'>;
+  run: AgenticRunSummary;
+  result?: unknown;
+  agentContext?: AgenticRunAgentContext;
+  progressReport?: AgenticRunProgressReportResult;
+}
+
+export interface AgenticRunSummary {
+  runKey: string;
+  checkName: string;
+  check?: Partial<McpApiCheck> | null;
+  project?: Partial<McpApiProject> | null;
+  prompt?: string | null;
+  status?: AgenticRunStatus | string | null;
+  progress?: Record<string, unknown> | null;
+  result?: unknown;
+  isActive: boolean;
+  creationDate?: string | Date | null;
+  updateDate?: string | Date | null;
+  raw?: McpApiAgenticRun;
+}
+
+export const AGENTIC_RUN_STATUS_VALUES = [
+  'draft',
+  'active',
+  'paused',
+  'completed',
+  'archived',
+] as const;
+
+export type AgenticRunStatus = (typeof AGENTIC_RUN_STATUS_VALUES)[number];
+
+export const AGENTIC_RUN_PROGRESS_STATUS_VALUES = [
+  'pending',
+  'in_progress',
+  'needs_model_work',
+  'ready_to_verify',
+  'ready_to_commit',
+  'ready_to_push',
+  'ready_to_mr',
+  'done',
+  'blocked',
+  'skipped',
+  'failed',
+] as const;
+
+export type AgenticRunProgressStatus =
+  (typeof AGENTIC_RUN_PROGRESS_STATUS_VALUES)[number];
+
+export interface AgenticRunProgressUpsertInput {
+  runKey: string;
+  projectName: string;
+  status?: AgenticRunProgressStatus;
+  repositoryUrl?: string | null;
+  localPath?: string | null;
+  branch?: string | null;
+  commitSha?: string | null;
+  mergeRequestUrl?: string | null;
+  mergeRequestState?: string | null;
+  mergeRequestDetailedStatus?: string | null;
+  pipelineStatus?: string | null;
+  pipelineUrl?: string | null;
+  pipelineFailureSummary?: string | null;
+  error?: string | null;
+  notes?: string | null;
+  verification?: Record<string, unknown> | null;
+  metadata?: Record<string, unknown> | null;
+  lastUpdateSource?: string;
+}
+
+export interface AgenticRunProgressUpsertResponse {
+  changed: boolean;
+  progress?: Record<string, unknown>;
+  row?: Record<string, unknown>;
+  run?: AgenticRunSummary;
+  [key: string]: unknown;
+}
+
+export interface AgenticRunProgressBulkResponse {
+  total: number;
+  succeeded: number;
+  failed: number;
+  results: AgenticRunProgressBulkRowResult[];
+}
+
+export interface AgenticRunProgressBulkRowResult {
+  index: number;
+  success: boolean;
+  result?: AgenticRunProgressUpsertResponse;
+  error?: string;
+}
+
+export interface AgenticRunProgressReportResult {
+  ok: boolean;
+  skipped?: boolean;
+  error?: string;
+  changed?: boolean;
+  payload?: AgenticRunProgressUpsertInput;
+  response?: AgenticRunProgressUpsertResponse;
 }

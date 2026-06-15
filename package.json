@@ -33,7 +33,7 @@
     "ts-node": "^10.9.2",
     "typescript": "^5.9.2"
   },
-  "description": "Omniboard.dev MCP server that turns actionable checks triggered for the current project into agent-driven fixes, refactors, and improvements that happen automatically.",
+  "description": "Omniboard.dev MCP server that exposes agentic check runs and run progress for local agents.",
   "keywords": [
     "omniboard.dev",
     "mcp",
