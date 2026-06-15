@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.1.8](https://github.com/omniboard-dev/mcp/compare/v0.1.7...v0.1.8) (2026-06-15)
+
+
+### Features
+
+* rework actionable checks into agentic checks and runs ([7a8e1f5](https://github.com/omniboard-dev/mcp/commit/7a8e1f5bd4f97e44908bf7fdcb4d0ebecf638f81))
+
 ### [0.1.7](https://github.com/omniboard-dev/mcp/compare/v0.1.6...v0.1.7) (2026-04-28)
 
 
