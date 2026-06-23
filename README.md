@@ -50,10 +50,10 @@ Claude Desktop and Cursor:
       "args": ["-y", "@omniboard/mcp"],
       "env": {
         "OMNIBOARD_API_KEY_MCP": "your-api-key",
-        "OMNIBOARD_API_KEY": "your-api-key" // optional, enables analyzer validation
-      }
-    }
-  }
+        "OMNIBOARD_API_KEY": "your-api-key", // optional, enables analyzer validation
+      },
+    },
+  },
 }
 ```
 
@@ -97,21 +97,22 @@ instructions. This also reports the run as `in_progress` idempotently.
 ### `omniboard_report_agentic_run_progress`
 
 Reports progress for one agentic run using `runKey`. Use it when a run reaches
-a workflow milestone such as `blocked`, `skipped`, `ready_to_commit`,
-`ready_to_mr`, or `done`. The tool can also send MR URLs, commit SHAs, pipeline
-status, concise errors, notes, verification metadata, and extra metadata.
+a workflow milestone such as `implemented`, `needs_input`, `verified`,
+`committed`, `pushed`, `mr_created`, `merged`, `blocked`, or `failed`.
+The tool can also send MR URLs, commit SHAs, pipeline status, concise errors,
+notes, verification metadata, and extra metadata.
 
 ### `omniboard_validate_agentic_run`
 
 Validates one agentic run by `runKey`. The tool resolves the check name from the
 run, reports validation progress to that run, and returns the analyzer result.
 When `OMNIBOARD_API_KEY` is not available, the tool returns a skipped result and
-reports `ready_to_verify`. When the key is available, the tool runs:
+reports `implemented`. When the key is available, the tool runs:
 
 ```sh
 npx @omniboard/analyzer --ak <OMNIBOARD_API_KEY> --cp <check-name> --json
 ```
 
-It then inspects `./dist/omniboard.json`, reports `ready_to_commit` when the
-check is resolved or `needs_model_work` when it still matches, and removes the
+It then inspects `./dist/omniboard.json`, reports `verified` when the
+check is resolved or `needs_input` when it still matches, and removes the
 generated JSON file before completing.

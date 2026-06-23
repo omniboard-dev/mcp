@@ -182,14 +182,14 @@ export type AgenticRunStatus = (typeof AGENTIC_RUN_STATUS_VALUES)[number];
 export const AGENTIC_RUN_PROGRESS_STATUS_VALUES = [
   'pending',
   'in_progress',
-  'needs_model_work',
-  'ready_to_verify',
-  'ready_to_commit',
-  'ready_to_push',
-  'ready_to_mr',
-  'done',
+  'implemented',
+  'needs_input',
+  'verified',
+  'committed',
+  'pushed',
+  'mr_created',
+  'merged',
   'blocked',
-  'skipped',
   'failed',
 ] as const;
 

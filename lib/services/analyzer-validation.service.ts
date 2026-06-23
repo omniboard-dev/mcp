@@ -15,19 +15,19 @@ const MAX_BUFFER_SIZE = 1 * 1024 * 1024;
 const NPX_COMMAND = process.platform === 'win32' ? 'npx.cmd' : 'npx';
 
 export async function validateAgenticRun(
-  runKey: string
+  runKey: string,
 ): Promise<AgenticRunValidationResponse> {
   const apiKey = process.env.OMNIBOARD_API_KEY;
   const outputPath = path.resolve(process.cwd(), OUTPUT_PATH);
   const { run } = await getAgenticRun(runKey);
   const checkName = run.checkName;
   const command = `npx @omniboard/analyzer --ak <OMNIBOARD_API_KEY> --cp ${shellQuote(
-    checkName
+    checkName,
   )} --json`;
 
   if (!apiKey) {
     const progressReport = await reportAgenticRunProgressSafely(run.runKey, {
-      status: 'ready_to_verify',
+      status: 'implemented',
       notes:
         'Analyzer validation was skipped because OMNIBOARD_API_KEY was not provided.',
       verification: {
@@ -60,9 +60,9 @@ export async function validateAgenticRun(
   const startedProgressReport = await reportAgenticRunProgressSafely(
     run.runKey,
     {
-      status: 'ready_to_verify',
+      status: 'implemented',
       notes: 'Analyzer validation started.',
-    }
+    },
   );
 
   try {
@@ -73,7 +73,7 @@ export async function validateAgenticRun(
         cwd: process.cwd(),
         env: process.env,
         maxBuffer: MAX_BUFFER_SIZE,
-      }
+      },
     );
     stdout = result.stdout;
     stderr = result.stderr;
@@ -97,7 +97,7 @@ export async function validateAgenticRun(
       stderr,
     };
     response.progressReport = await reportAgenticRunProgressSafely(run.runKey, {
-      status: stillMatches ? 'needs_model_work' : 'ready_to_commit',
+      status: stillMatches ? 'needs_input' : 'verified',
       error: stillMatches
         ? `Agentic check "${checkName}" still matches.`
         : null,

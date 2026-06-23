@@ -34,7 +34,7 @@ export interface ListAgenticRunProjectsOptions {
 }
 
 export async function listAgenticRuns(
-  checkName?: string
+  checkName?: string,
 ): Promise<AgenticRunsResponse> {
   return api.getAgenticRuns(await getOmniboardProject(), checkName);
 }
@@ -51,7 +51,7 @@ export async function listAgenticRunProjects({
 }
 
 export async function getAgenticRun(
-  runKey: string
+  runKey: string,
 ): Promise<AgenticRunResponse> {
   const response = await api.getAgenticRun(await getOmniboardProject(), runKey);
   const progressReport = await reportAgenticRunProgressSafely(runKey, {
@@ -70,7 +70,7 @@ export async function getAgenticRun(
 
 export async function reportAgenticRunProgress(
   runKey: string,
-  options: ReportAgenticRunProgressOptions = {}
+  options: ReportAgenticRunProgressOptions = {},
 ): Promise<AgenticRunProgressReportResult> {
   const payload = await createAgenticRunProgressPayload(runKey, options);
   const response = await api.upsertAgenticRunProgress(payload);
@@ -85,7 +85,7 @@ export async function reportAgenticRunProgress(
 
 export async function reportAgenticRunProgressSafely(
   runKey: string,
-  options: ReportAgenticRunProgressOptions = {}
+  options: ReportAgenticRunProgressOptions = {},
 ): Promise<AgenticRunProgressReportResult> {
   try {
     return await reportAgenticRunProgress(runKey, options);
@@ -103,7 +103,7 @@ export function createAgenticRunAgentContext(run: AgenticRunSummary) {
     instructions: [
       'Use the agentic run prompt, check metadata, and result details as the primary context for the change.',
       'Inspect the local codebase before editing and make the smallest coherent change that resolves the agentic check.',
-      `Report meaningful progress with \`omniboard_report_agentic_run_progress\` using runKey "${run.runKey}" when work is blocked, skipped, ready for commit, ready for MR, or done.`,
+      `Report meaningful progress with \`omniboard_report_agentic_run_progress\` using runKey "${run.runKey}" when work is implemented, needs input, verified, committed, pushed, MR created, merged, blocked, or failed.`,
       'After changing the code, run the relevant project build, test, or lint command when available.',
       `If \`OMNIBOARD_API_KEY\` is available, optionally run \`omniboard_validate_agentic_run\` with runKey "${run.runKey}" to confirm whether the check still matches.`,
       'If `OMNIBOARD_API_KEY` is not available, skip analyzer validation and report that it was skipped.',
@@ -126,7 +126,7 @@ function withAgentContext(response: AgenticRunResponse): AgenticRunResponse {
 
 async function createAgenticRunProgressPayload(
   runKey: string,
-  options: ReportAgenticRunProgressOptions
+  options: ReportAgenticRunProgressOptions,
 ): Promise<AgenticRunProgressUpsertInput> {
   const project = await getOmniboardProject();
 
@@ -160,7 +160,7 @@ async function createAgenticRunProgressPayload(
 function withoutUndefined<T extends Record<string, unknown>>(value: T): T {
   return Object.fromEntries(
     Object.entries(value).filter(
-      ([, currentValue]) => currentValue !== undefined
-    )
+      ([, currentValue]) => currentValue !== undefined,
+    ),
   ) as T;
 }
