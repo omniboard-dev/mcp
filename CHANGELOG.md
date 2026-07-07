@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.1.11](https://github.com/omniboard-dev/mcp/compare/v0.1.10...v0.1.11) (2026-07-07)
+
+
+### Features
+
+* standardize MCP execution mode tools ([69d6191](https://github.com/omniboard-dev/mcp/commit/69d61913db2f78332262df83b7c69bd270df48a0))
+
 ### [0.1.10](https://github.com/omniboard-dev/mcp/compare/v0.1.9...v0.1.10) (2026-06-23)
 
 
