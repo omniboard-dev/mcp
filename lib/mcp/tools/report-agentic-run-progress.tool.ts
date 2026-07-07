@@ -5,9 +5,9 @@ import { reportAgenticRunProgress } from '../../services/agentic-runs.service.js
 import { McpToolDefinition } from '../shared.js';
 
 export const reportAgenticRunProgressTool: McpToolDefinition = {
-  name: 'omniboard_report_agentic_run_progress',
+  name: 'omniboard_local_report_agentic_run_progress',
   description:
-    'Report progress for one Omniboard agentic run using its runKey.',
+    'Developer-local mode: report progress for one Omniboard agentic run using its runKey.',
   inputSchema: {
     runKey: z.string().min(1),
     status: z.enum(AGENTIC_RUN_PROGRESS_STATUS_VALUES),

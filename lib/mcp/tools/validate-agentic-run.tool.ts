@@ -4,9 +4,9 @@ import { validateAgenticRun } from '../../services/analyzer-validation.service.j
 import { McpToolDefinition } from '../shared.js';
 
 export const validateAgenticRunTool: McpToolDefinition = {
-  name: 'omniboard_validate_agentic_run',
+  name: 'omniboard_local_validate_agentic_run',
   description:
-    'Validate one Omniboard agentic run by runKey using @omniboard/analyzer, then report validation progress.',
+    'Developer-local mode: validate one Omniboard agentic run by runKey using @omniboard/analyzer, then report validation progress.',
   inputSchema: {
     runKey: z.string().min(1),
   },

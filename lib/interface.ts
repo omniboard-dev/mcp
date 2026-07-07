@@ -100,7 +100,7 @@ export interface AgenticRunAgentContext {
   validation: {
     optional: boolean;
     requiredEnv: 'OMNIBOARD_API_KEY';
-    tool: 'omniboard_validate_agentic_run';
+    tool: 'omniboard_local_validate_agentic_run';
     skipWhenMissingEnv: boolean;
   };
 }
