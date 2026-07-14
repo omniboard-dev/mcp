@@ -5,6 +5,7 @@ import {
   AgenticRunMatchedProjectsResponse,
   AgenticRunResponse,
   AgenticRunsResponse,
+  RunnerAgenticRunsResponse,
   AgenticRunSummary,
 } from '../interface.js';
 import * as api from './api.service.js';
@@ -33,6 +34,10 @@ export interface ListAgenticRunProjectsOptions {
   runKey?: string;
 }
 
+export function listRunnerAgenticRuns(): Promise<RunnerAgenticRunsResponse> {
+  return api.getRunnerAgenticRuns();
+}
+
 export async function listAgenticRuns(
   checkName?: string
 ): Promise<AgenticRunsResponse> {
@@ -48,6 +53,13 @@ export async function listAgenticRunProjects({
   }
 
   return api.getAgenticRunMatchedProjects({ checkName, runKey });
+}
+
+export async function getRunnerAgenticRun(
+  projectName: string,
+  runKey: string
+): Promise<AgenticRunResponse> {
+  return api.getAgenticRun({ name: projectName, names: [projectName] }, runKey);
 }
 
 export async function getAgenticRun(
@@ -81,6 +93,60 @@ export async function reportAgenticRunProgress(
     payload,
     response,
   };
+}
+
+export async function reportRunnerAgenticRunProgress(
+  runKey: string,
+  projectName: string,
+  options: ReportAgenticRunProgressOptions = {}
+): Promise<AgenticRunProgressReportResult> {
+  const payload = withoutUndefined({
+    runKey,
+    projectName,
+    status: options.status,
+    repositoryUrl: options.repositoryUrl ?? null,
+    localPath: options.localPath ?? null,
+    branch: options.branch ?? null,
+    commitSha: options.commitSha ?? null,
+    mergeRequestUrl: options.mergeRequestUrl ?? null,
+    mergeRequestState: options.mergeRequestState ?? null,
+    mergeRequestDetailedStatus: options.mergeRequestDetailedStatus ?? null,
+    pipelineStatus: options.pipelineStatus ?? null,
+    pipelineUrl: options.pipelineUrl ?? null,
+    pipelineFailureSummary: options.pipelineFailureSummary ?? null,
+    error: options.error ?? null,
+    notes: options.notes ?? null,
+    verification: options.verification ?? null,
+    metadata: {
+      ...(options.metadata ?? {}),
+      executionMode: 'dedicated-runner',
+      projectName,
+    },
+    lastUpdateSource: 'mcp',
+  });
+  const response = await api.upsertAgenticRunProgress(payload);
+
+  return {
+    ok: true,
+    changed: response.changed,
+    payload,
+    response,
+  };
+}
+
+export async function reportRunnerAgenticRunProgressSafely(
+  runKey: string,
+  projectName: string,
+  options: ReportAgenticRunProgressOptions = {}
+): Promise<AgenticRunProgressReportResult> {
+  try {
+    return await reportRunnerAgenticRunProgress(runKey, projectName, options);
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
 }
 
 export async function reportAgenticRunProgressSafely(
@@ -148,8 +214,8 @@ async function createAgenticRunProgressPayload(
     notes: options.notes ?? null,
     verification: options.verification ?? null,
     metadata: {
-      executionMode: 'developer-local',
       ...(options.metadata ?? {}),
+      executionMode: 'developer-local',
       projectName: project.name,
       projectType: project.type ?? null,
       projectNames: project.names,

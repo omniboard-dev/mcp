@@ -66,6 +66,8 @@ export interface McpApiMatchedProject {
   updateDate?: string | Date | null;
   value?: boolean | string | null;
   result?: unknown;
+  repositoryUrl?: string | null;
+  repositoryUrls?: string[];
 }
 
 export interface McpApiMatchedProjectsResponse {
@@ -129,6 +131,11 @@ export interface AgenticRunsResponse {
   total: number;
 }
 
+export interface RunnerAgenticRunsResponse {
+  runs: AgenticRunSummary[];
+  total: number;
+}
+
 export interface AgenticRunResponse {
   project: Pick<McpApiProject, 'id' | 'name'>;
   run: AgenticRunSummary;
@@ -144,6 +151,8 @@ export interface AgenticRunMatchedProject {
   updateDate?: string | Date | null;
   value?: boolean | string | null;
   result?: unknown;
+  repositoryUrl?: string | null;
+  repositoryUrls?: string[];
 }
 
 export interface AgenticRunMatchedProjectsResponse {
@@ -246,4 +255,50 @@ export interface AgenticRunProgressReportResult {
   changed?: boolean;
   payload?: AgenticRunProgressUpsertInput;
   response?: AgenticRunProgressUpsertResponse;
+}
+
+export interface McpRepositoryAccess {
+  provider: 'gitlab';
+  host: string;
+  apiBaseUrl: string;
+  projectPath?: string;
+  token: string;
+}
+
+export interface RunnerWorkspaceState {
+  runKey: string;
+  checkName: string;
+  projectName: string;
+  repositoryUrl: string;
+  localPath: string;
+  branch: string;
+  targetBranch: string;
+  projectPath: string;
+  preparedHeadSha: string;
+  commitSha?: string;
+  provider: 'gitlab';
+  apiBaseUrl: string;
+}
+
+export interface RunnerWorkspacePrepareResult {
+  run: AgenticRunSummary;
+  project: AgenticRunMatchedProject;
+  result?: unknown;
+  workspace: RunnerWorkspaceState;
+  prompt: string | null;
+  instructions: string[];
+  progressReport: AgenticRunProgressReportResult;
+}
+
+export interface RunnerWorkspaceFinalizeResult {
+  workspace: RunnerWorkspaceState;
+  commitSha: string;
+  mergeRequest: {
+    id?: number;
+    iid?: number;
+    url: string;
+    state: string;
+    title: string;
+  };
+  progressReports: AgenticRunProgressReportResult[];
 }

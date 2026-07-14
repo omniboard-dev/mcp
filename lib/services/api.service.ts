@@ -3,7 +3,9 @@ import {
   DEFAULT_API_URL,
   MCP_CHECKS_ENDPOINT,
   MCP_RUN_ENDPOINT,
+  MCP_RUNS_ENDPOINT,
   MCP_MATCHED_PROJECTS_ENDPOINT,
+  MCP_REPOSITORY_ACCESS_ENDPOINT,
   SETTINGS_ENDPOINT,
 } from '../consts.js';
 import {
@@ -18,8 +20,10 @@ import {
   McpApiMatchedProjectsResponse,
   McpApiProject,
   McpApiRunResponse,
+  McpRepositoryAccess,
   ProjectInfo,
   Settings,
+  RunnerAgenticRunsResponse,
 } from '../interface.js';
 
 let apiUrl: string;
@@ -42,6 +46,18 @@ export function createApiService() {
 
 export const getSettings = (): Promise<Settings> =>
   request<Settings>(SETTINGS_ENDPOINT);
+
+export const getRunnerAgenticRuns =
+  async (): Promise<RunnerAgenticRunsResponse> => {
+    const response = await request<{ runs: McpApiAgenticRun[]; total: number }>(
+      MCP_RUNS_ENDPOINT
+    );
+    const runs = normalizeAgenticRunsResponse(response.runs ?? []);
+    return {
+      runs,
+      total: response.total ?? runs.length,
+    };
+  };
 
 export const getAgenticRuns = async (
   project: ProjectInfo,
@@ -145,6 +161,14 @@ export const getAgenticRunMatchedProjects = async ({
     total: response.total ?? response.projects?.length ?? 0,
   };
 };
+
+export const getRepositoryAccess = (
+  repositoryUrl: string
+): Promise<McpRepositoryAccess> =>
+  request<McpRepositoryAccess>(MCP_REPOSITORY_ACCESS_ENDPOINT, {
+    method: 'POST',
+    body: JSON.stringify({ repositoryUrl }),
+  });
 
 export const upsertAgenticRunProgress = (
   progress: AgenticRunProgressUpsertInput
@@ -273,5 +297,7 @@ function normalizeMatchedProject(
     updateDate: project.updateDate ?? null,
     value: project.value ?? null,
     result: project.result ?? null,
+    repositoryUrl: project.repositoryUrl ?? null,
+    repositoryUrls: project.repositoryUrls ?? [],
   };
 }
