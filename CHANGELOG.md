@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.1.13](https://github.com/omniboard-dev/mcp/compare/v0.1.12...v0.1.13) (2026-07-14)
+
+
+### Features
+
+* add dedicated runner mode ([502b2d1](https://github.com/omniboard-dev/mcp/commit/502b2d1136c153212c4097a9e8e3767d750ff5f4))
+
 ### [0.1.12](https://github.com/omniboard-dev/mcp/compare/v0.1.11...v0.1.12) (2026-07-07)
 
 ### [0.1.11](https://github.com/omniboard-dev/mcp/compare/v0.1.10...v0.1.11) (2026-07-07)
