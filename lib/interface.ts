@@ -257,13 +257,25 @@ export interface AgenticRunProgressReportResult {
   response?: AgenticRunProgressUpsertResponse;
 }
 
-export interface McpRepositoryAccess {
+export interface GitlabRepositoryAccess {
   provider: 'gitlab';
   host: string;
   apiBaseUrl: string;
   projectPath?: string;
   token: string;
 }
+
+export interface BitbucketDataCenterRepositoryAccess {
+  provider: 'bitbucket_data_center';
+  host: string;
+  apiBaseUrl: string;
+  username: string;
+  token: string;
+}
+
+export type McpRepositoryAccess =
+  | GitlabRepositoryAccess
+  | BitbucketDataCenterRepositoryAccess;
 
 export interface RunnerWorkspaceState {
   runKey: string;
@@ -276,7 +288,7 @@ export interface RunnerWorkspaceState {
   projectPath: string;
   preparedHeadSha: string;
   commitSha?: string;
-  provider: 'gitlab';
+  provider: McpRepositoryAccess['provider'];
   apiBaseUrl: string;
 }
 

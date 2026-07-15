@@ -1,4 +1,4 @@
-import { McpRepositoryAccess } from '../interface.js';
+import { GitlabRepositoryAccess } from '../interface.js';
 import {
   isLocalTransportAllowed,
   isLoopbackHostname,
@@ -36,7 +36,7 @@ interface GitlabProjectPermissionsResponse {
 }
 
 export async function validateGitlabProjectAccess(
-  access: McpRepositoryAccess,
+  access: GitlabRepositoryAccess,
   repositoryUrl: string
 ) {
   const apiBaseUrl = resolveGitlabApiBaseUrl(access.apiBaseUrl);
@@ -123,7 +123,7 @@ export async function validateGitlabProjectAccess(
 }
 
 export async function createGitlabMergeRequest(
-  access: McpRepositoryAccess,
+  access: GitlabRepositoryAccess,
   projectPath: string,
   sourceBranch: string,
   targetBranch: string,
@@ -212,7 +212,7 @@ function normalizeMergeRequest(response: GitlabMergeRequestResponse) {
 }
 
 function resolveGitlabProjectPath(
-  access: McpRepositoryAccess,
+  access: GitlabRepositoryAccess,
   repositoryUrl: string,
   apiBaseUrl: string
 ) {

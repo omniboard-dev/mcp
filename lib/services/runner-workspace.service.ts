@@ -29,9 +29,11 @@ import {
   pushBranch,
 } from './git.service.js';
 import {
-  createGitlabMergeRequest,
-  validateGitlabProjectAccess,
-} from './gitlab.service.js';
+  createChangeRequest,
+  providerLabel,
+  resolveGitUsername,
+  validateRepositoryAccess,
+} from './source-control.service.js';
 import {
   isLocalTransportAllowed,
   isLoopbackHostname,
@@ -103,7 +105,7 @@ export async function prepareRunnerWorkspace({
       resolvedRepositoryUrl,
       effectiveRepositoryUrl
     );
-    const gitlabProject = await validateGitlabProjectAccess(
+    const repository = await validateRepositoryAccess(
       access,
       effectiveRepositoryUrl
     );
@@ -136,7 +138,7 @@ export async function prepareRunnerWorkspace({
       localPath,
       branch: resolvedBranch,
       targetBranch,
-      projectPath: gitlabProject.projectPath,
+      projectPath: repository.repositoryId,
       preparedHeadSha,
       provider: access.provider,
       apiBaseUrl: access.apiBaseUrl,
@@ -253,13 +255,17 @@ export async function finalizeRunnerWorkspace({
       state.repositoryUrl,
       effectiveRepositoryUrl
     );
-    const gitlabProject = await validateGitlabProjectAccess(
+    const repository = await validateRepositoryAccess(
       access,
       effectiveRepositoryUrl
     );
-    if (gitlabProject.projectPath !== state.projectPath) {
+    if (repository.repositoryId !== state.projectPath) {
       throw new Error(
-        `GitLab project identity changed from "${state.projectPath}" to "${gitlabProject.projectPath}".`
+        `${providerLabel(access)} ${
+          access.provider === 'gitlab' ? 'project' : 'repository'
+        } identity changed from "${state.projectPath}" to "${
+          repository.repositoryId
+        }".`
       );
     }
     await withGitCredentials(access, localPath, (env) =>
@@ -276,7 +282,7 @@ export async function finalizeRunnerWorkspace({
       })
     );
 
-    const mergeRequest = await createGitlabMergeRequest(
+    const mergeRequest = await createChangeRequest(
       access,
       state.projectPath,
       state.branch,
@@ -403,18 +409,19 @@ async function withGitCredentials<T>(
       ? 'omniboard-askpass.cmd'
       : 'omniboard-askpass.sh'
   );
+  const username = resolveGitUsername(access);
   const script =
     process.platform === 'win32'
       ? [
           '@echo off',
           'echo %~1 | findstr /I "Username" >nul',
-          'if %errorlevel%==0 (echo oauth2) else (echo %OMNIBOARD_GIT_TOKEN%)',
+          'if %errorlevel%==0 (echo %OMNIBOARD_GIT_USERNAME%) else (echo %OMNIBOARD_GIT_TOKEN%)',
           '',
         ].join('\r\n')
       : [
           '#!/bin/sh',
           'case "$1" in',
-          '  *Username*) printf "%s\\n" "oauth2" ;;',
+          '  *Username*) printf "%s\\n" "$OMNIBOARD_GIT_USERNAME" ;;',
           '  *) printf "%s\\n" "$OMNIBOARD_GIT_TOKEN" ;;',
           'esac',
           '',
@@ -427,6 +434,7 @@ async function withGitCredentials<T>(
       GIT_ASKPASS: askPassPath,
       GIT_TERMINAL_PROMPT: '0',
       OMNIBOARD_GIT_TOKEN: access.token,
+      OMNIBOARD_GIT_USERNAME: username,
     });
   } finally {
     await fs.rm(askPassDirectory, { recursive: true, force: true });

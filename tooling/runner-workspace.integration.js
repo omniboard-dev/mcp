@@ -25,6 +25,10 @@ let repositoryAccessHost = 'gitlab.example.com';
 let expectedProjectPath = normalizeProjectPath(remotePath);
 let includeProjectPath = true;
 let mergeRequestPayload;
+let bitbucketPullRequestPayload;
+let bitbucketAuthorization;
+let bitbucketPullRequestCreateCount = 0;
+let bitbucketPullRequestLookupCount = 0;
 let mergeRequestCreateCount = 0;
 let mergeRequestLookupCount = 0;
 let canPush = true;
@@ -138,6 +142,84 @@ try {
       return send(response, { changed: true, row: body });
     }
 
+    if (
+      request.method === 'GET' &&
+      url.pathname === '/bitbucket/rest/api/latest/projects/OB/repos/project-a'
+    ) {
+      bitbucketAuthorization = request.headers.authorization;
+      return send(response, {
+        archived: false,
+        state: 'AVAILABLE',
+      });
+    }
+
+    if (
+      request.method === 'GET' &&
+      url.pathname ===
+        '/bitbucket/rest/api/latest/projects/OB/repos/project-a/pull-requests'
+    ) {
+      bitbucketPullRequestLookupCount += 1;
+      assert.equal(url.searchParams.get('state'), 'OPEN');
+      assert.equal(url.searchParams.get('at'), 'refs/heads/main');
+      if (!url.searchParams.has('start')) {
+        return send(response, {
+          values: [],
+          isLastPage: false,
+          nextPageStart: 25,
+        });
+      }
+      assert.equal(url.searchParams.get('start'), '25');
+      return send(response, {
+        values: [
+          {
+            id: 17,
+            state: 'OPEN',
+            title: bitbucketPullRequestPayload.title,
+            fromRef: bitbucketPullRequestPayload.fromRef,
+            toRef: bitbucketPullRequestPayload.toRef,
+            links: {
+              self: [
+                {
+                  href: 'https://bitbucket.example.com/projects/OB/repos/project-a/pull-requests/17',
+                },
+              ],
+            },
+          },
+        ],
+        isLastPage: true,
+      });
+    }
+    if (
+      request.method === 'POST' &&
+      url.pathname ===
+        '/bitbucket/rest/api/latest/projects/OB/repos/project-a/pull-requests'
+    ) {
+      bitbucketPullRequestCreateCount += 1;
+      bitbucketAuthorization = request.headers.authorization;
+      bitbucketPullRequestPayload = body;
+      if (bitbucketPullRequestCreateCount > 1) {
+        response.statusCode = 409;
+        return send(response, {
+          errors: [{ message: 'A pull request already exists.' }],
+        });
+      }
+      response.statusCode = 201;
+      return send(response, {
+        id: 17,
+        state: 'OPEN',
+        title: body.title,
+        fromRef: body.fromRef,
+        toRef: body.toRef,
+        links: {
+          self: [
+            {
+              href: 'https://bitbucket.example.com/projects/OB/repos/project-a/pull-requests/17',
+            },
+          ],
+        },
+      });
+    }
+
     if (request.method === 'POST' && url.pathname === '/gitlab/api/graphql') {
       assert.equal(body.variables.projectPath, expectedProjectPath);
       return send(response, {
@@ -229,6 +311,11 @@ try {
     const { reportRunnerAgenticRunProgress } = await import(
       '../dist/services/agentic-runs.service.js'
     );
+    const {
+      createChangeRequest,
+      resolveGitUsername,
+      validateRepositoryAccess,
+    } = await import('../dist/services/source-control.service.js');
 
     await assert.rejects(
       prepareRunnerWorkspace({
@@ -238,6 +325,70 @@ try {
       /secure HTTPS/
     );
     process.env.OMNIBOARD_MCP_ALLOW_LOCAL_TRANSPORTS = 'true';
+
+    const bitbucketAccess = {
+      provider: 'bitbucket_data_center',
+      host: 'bitbucket.example.com',
+      apiBaseUrl: `http://127.0.0.1:${
+        server.address().port
+      }/bitbucket/rest/api/latest`,
+      username: 'omniboard-service',
+      token: 'bitbucket-token',
+    };
+    const bitbucketRepository = await validateRepositoryAccess(
+      bitbucketAccess,
+      'https://bitbucket.example.com/scm/OB/project-a.git'
+    );
+    assert.equal(bitbucketRepository.repositoryId, 'OB/project-a');
+    assert.equal(resolveGitUsername(bitbucketAccess), 'omniboard-service');
+    const bitbucketPullRequest = await createChangeRequest(
+      bitbucketAccess,
+      bitbucketRepository.repositoryId,
+      'agentic/run-uxf',
+      'main',
+      'Fix UXF icon registry',
+      'Automated test change.'
+    );
+    assert.equal(bitbucketPullRequest.id, 17);
+    assert.equal(
+      bitbucketPullRequest.url,
+      'https://bitbucket.example.com/projects/OB/repos/project-a/pull-requests/17'
+    );
+    assert.equal(
+      bitbucketAuthorization,
+      `Basic ${Buffer.from('omniboard-service:bitbucket-token').toString(
+        'base64'
+      )}`
+    );
+    assert.deepEqual(bitbucketPullRequestPayload.fromRef, {
+      id: 'refs/heads/agentic/run-uxf',
+      repository: {
+        slug: 'project-a',
+        project: { key: 'OB' },
+      },
+    });
+    assert.deepEqual(bitbucketPullRequestPayload.toRef, {
+      id: 'refs/heads/main',
+      repository: {
+        slug: 'project-a',
+        project: { key: 'OB' },
+      },
+    });
+    const retriedBitbucketPullRequest = await createChangeRequest(
+      bitbucketAccess,
+      bitbucketRepository.repositoryId,
+      'agentic/run-uxf',
+      'main',
+      'Fix UXF icon registry',
+      'Automated test change.'
+    );
+    assert.equal(retriedBitbucketPullRequest.id, 17);
+    assert.equal(
+      retriedBitbucketPullRequest.url,
+      'https://bitbucket.example.com/projects/OB/repos/project-a/pull-requests/17'
+    );
+    assert.equal(bitbucketPullRequestCreateCount, 2);
+    assert.equal(bitbucketPullRequestLookupCount, 2);
 
     await reportRunnerAgenticRunProgress('run-uxf', 'project-a', {
       status: 'in_progress',
