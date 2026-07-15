@@ -112,6 +112,8 @@ try {
           runKey: 'run-uxf',
           checkName: 'uxf-icon-registry',
           prompt: 'Update the icon registry.',
+          branchName: 'agentic/run-uxf',
+          commitMessage: 'fix(OB-123): update icon registry',
           status: 'active',
           isActive: true,
         },
@@ -305,8 +307,62 @@ try {
     process.env.OMNIBOARD_API_URL = `http://127.0.0.1:${server.address().port}`;
     process.env.UNRELATED_RUNNER_SECRET = 'ambient-secret';
     delete process.env.OMNIBOARD_MCP_ALLOW_LOCAL_TRANSPORTS;
-    const { prepareRunnerWorkspace, finalizeRunnerWorkspace } = await import(
-      '../dist/services/runner-workspace.service.js'
+    const {
+      prepareRunnerWorkspace,
+      finalizeRunnerWorkspace,
+      resolveRunnerGitValues,
+    } = await import('../dist/services/runner-workspace.service.js');
+
+    const baseRun = {
+      runKey: 'run-fallback',
+      checkName: 'uxf-icon-registry',
+      isActive: true,
+    };
+    assert.deepEqual(
+      resolveRunnerGitValues(
+        {
+          ...baseRun,
+          branchName: 'feature/OB-123-definition',
+          commitMessage: 'fix(OB-123): definition values',
+        },
+        { branch: 'feature/OB-123-explicit' }
+      ),
+      {
+        branchName: 'feature/OB-123-explicit',
+        commitMessage: 'fix(OB-123): definition values',
+      }
+    );
+    assert.deepEqual(
+      resolveRunnerGitValues({
+        ...baseRun,
+        prompt:
+          '### Branch name: `feature/OB-456-from-prompt`\n- **Commit message:** "fix(OB-456): from prompt"',
+      }),
+      {
+        branchName: 'feature/OB-456-from-prompt',
+        commitMessage: 'fix(OB-456): from prompt',
+      }
+    );
+    const emptyPromptGitValues = resolveRunnerGitValues({
+      ...baseRun,
+      prompt: 'Branch name: ""\nCommit message: ""',
+    });
+    assert.match(
+      emptyPromptGitValues.branchName,
+      /^agentic\/run-fallback-[a-z0-9]+$/
+    );
+    assert.equal(
+      emptyPromptGitValues.commitMessage,
+      'chore: complete agentic run run-fallback'
+    );
+    const defaultGitValues = resolveRunnerGitValues(baseRun);
+    assert.match(
+      defaultGitValues.branchName,
+      /^agentic\/run-fallback-[a-z0-9]+$/
+    );
+    assert.equal(
+      defaultGitValues.commitMessage,
+      'chore: complete agentic run run-fallback'
     );
     const { reportRunnerAgenticRunProgress } = await import(
       '../dist/services/agentic-runs.service.js'
@@ -524,7 +580,6 @@ try {
         runKey: 'run-uxf',
         projectName: 'project-a',
         localPath: retryPrepared.workspace.localPath,
-        commitMessage: 'fix: update icon registry',
       }),
       /no verified runner commit to resume/
     );
@@ -548,9 +603,12 @@ try {
       runKey: 'run-uxf',
       projectName: 'project-a',
       repositoryUrl: pathToFileUrl(remotePath).replace(/\.git$/, ''),
-      branch: 'agentic/run-uxf',
     });
     assert.equal(prepared.workspace.branch, 'agentic/run-uxf');
+    assert.equal(
+      prepared.workspace.commitMessage,
+      'fix(OB-123): update icon registry'
+    );
     assert.equal(prepared.workspace.targetBranch, 'main');
     assert.equal(prepared.workspace.projectPath, 'group/project');
     assert.match(prepared.workspace.preparedHeadSha, /^[a-f0-9]{40}$/);
@@ -584,7 +642,6 @@ try {
         runKey: 'run-uxf',
         projectName: 'project-a',
         localPath: prepared.workspace.localPath,
-        commitMessage: 'fix: update icon registry',
       }),
       /metadata integrity validation failed/
     );
@@ -604,7 +661,6 @@ try {
         runKey: 'run-uxf',
         projectName: 'project-a',
         localPath: prepared.workspace.localPath,
-        commitMessage: 'fix: update icon registry',
         mergeRequestTitle: 'Fix UXF icon registry',
       }),
       /Git worktree .* is outside runner workspace/
@@ -682,7 +738,6 @@ cat
         runKey: 'run-uxf',
         projectName: 'project-a',
         localPath: prepared.workspace.localPath,
-        commitMessage: 'fix: update icon registry',
         mergeRequestTitle: 'Fix UXF icon registry',
       }),
       /GitLab project identity changed/
@@ -694,7 +749,6 @@ cat
       runKey: 'run-uxf',
       projectName: 'project-a',
       localPath: prepared.workspace.localPath,
-      commitMessage: 'fix: update icon registry',
       mergeRequestTitle: 'Fix UXF icon registry',
     });
 
@@ -707,7 +761,6 @@ cat
       runKey: 'run-uxf',
       projectName: 'project-a',
       localPath: prepared.workspace.localPath,
-      commitMessage: 'fix: update icon registry',
       mergeRequestTitle: 'Fix UXF icon registry',
     });
     assert.equal(retried.commitSha, finalized.commitSha);
@@ -752,7 +805,6 @@ cat
           runKey: 'run-uxf',
           projectName: 'project-a',
           localPath: prepared.workspace.localPath,
-          commitMessage: 'fix: update icon registry',
           mergeRequestTitle: 'Fix UXF icon registry',
         }),
         /must not be a symlink/

@@ -24,6 +24,11 @@ try {
   assert(names.includes('omniboard_runner_finalize_agentic_run_workspace'));
   assert(names.includes('omniboard_runner_report_agentic_run_progress'));
 
+  const finalizeTool = tools.find(
+    (tool) => tool.name === 'omniboard_runner_finalize_agentic_run_workspace'
+  );
+  assert(!finalizeTool.inputSchema.required.includes('commitMessage'));
+
   const runnerProgressTool = tools.find(
     (tool) => tool.name === 'omniboard_runner_report_agentic_run_progress'
   );

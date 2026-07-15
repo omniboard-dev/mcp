@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import {
+  AgenticRunSummary,
   McpRepositoryAccess,
   RunnerWorkspaceFinalizeResult,
   RunnerWorkspacePrepareResult,
@@ -64,7 +65,7 @@ export interface FinalizeRunnerWorkspaceOptions {
   runKey: string;
   projectName: string;
   localPath: string;
-  commitMessage: string;
+  commitMessage?: string;
   mergeRequestTitle?: string;
   mergeRequestDescription?: string;
   authorName?: string;
@@ -93,6 +94,9 @@ export async function prepareRunnerWorkspace({
     }
 
     const runResponse = await getRunnerAgenticRun(projectName, runKey);
+    const resolvedGitValues = resolveRunnerGitValues(runResponse.run, {
+      branch,
+    });
     resolvedRepositoryUrl = resolveProjectRepositoryUrl(project, repositoryUrl);
 
     const access = await api.getRepositoryAccess(resolvedRepositoryUrl);
@@ -125,9 +129,7 @@ export async function prepareRunnerWorkspace({
     );
     await assertGitWorkspaceIdentity(localPath);
     const targetBranch = await getDefaultBranch(localPath);
-    const resolvedBranch =
-      branch ?? `agentic/${slug(runKey)}-${Date.now().toString(36)}`;
-    await createBranch(resolvedBranch, localPath);
+    await createBranch(resolvedGitValues.branchName, localPath);
     const preparedHeadSha = (await getHeadCommit(localPath)).sha;
 
     const state: RunnerWorkspaceState = {
@@ -136,7 +138,8 @@ export async function prepareRunnerWorkspace({
       projectName,
       repositoryUrl: resolvedRepositoryUrl,
       localPath,
-      branch: resolvedBranch,
+      branch: resolvedGitValues.branchName,
+      commitMessage: resolvedGitValues.commitMessage,
       targetBranch,
       projectPath: repository.repositoryId,
       preparedHeadSha,
@@ -153,7 +156,7 @@ export async function prepareRunnerWorkspace({
         status: 'in_progress',
         repositoryUrl: resolvedRepositoryUrl,
         localPath,
-        branch: resolvedBranch,
+        branch: resolvedGitValues.branchName,
         notes: `Prepared dedicated runner workspace for "${projectName}".`,
         metadata: {
           mcpTool: 'omniboard_runner_prepare_agentic_run_workspace',
@@ -173,7 +176,7 @@ export async function prepareRunnerWorkspace({
         'Use the returned prompt and check result as the source of truth.',
         'Inspect the project and implement the smallest coherent change that resolves the check.',
         'Run relevant tests, lint, or build commands before finalizing.',
-        `When ready, call omniboard_runner_finalize_agentic_run_workspace with runKey "${runKey}", projectName "${projectName}", and localPath "${localPath}".`,
+        `When ready, call omniboard_runner_finalize_agentic_run_workspace with runKey "${runKey}", projectName "${projectName}", and localPath "${localPath}". The prepared commit message is "${resolvedGitValues.commitMessage}".`,
       ],
       progressReport,
     };
@@ -219,6 +222,11 @@ export async function finalizeRunnerWorkspace({
 }: FinalizeRunnerWorkspaceOptions): Promise<RunnerWorkspaceFinalizeResult> {
   const { state, localPath } = await readRunnerState(requestedLocalPath);
   assertWorkspaceIdentity(state, runKey, projectName, localPath);
+  const resolvedCommitMessage =
+    normalizeNonEmptyString(commitMessage) ??
+    state.commitMessage ??
+    defaultCommitMessage(runKey);
+  state.commitMessage = resolvedCommitMessage;
   const progressReports = [];
 
   try {
@@ -229,11 +237,15 @@ export async function finalizeRunnerWorkspace({
       ? await createRunnerCommit(
           state,
           localPath,
-          commitMessage,
+          resolvedCommitMessage,
           authorName,
           authorEmail
         )
-      : await resolveExistingRunnerCommit(state, localPath, commitMessage);
+      : await resolveExistingRunnerCommit(
+          state,
+          localPath,
+          resolvedCommitMessage
+        );
     progressReports.push(
       await reportRunnerAgenticRunProgressSafely(runKey, projectName, {
         status: 'committed',
@@ -241,7 +253,7 @@ export async function finalizeRunnerWorkspace({
         localPath,
         branch: state.branch,
         commitSha,
-        notes: commitMessage,
+        notes: resolvedCommitMessage,
       })
     );
 
@@ -287,7 +299,7 @@ export async function finalizeRunnerWorkspace({
       state.projectPath,
       state.branch,
       state.targetBranch,
-      mergeRequestTitle ?? commitMessage,
+      mergeRequestTitle ?? resolvedCommitMessage,
       mergeRequestDescription ??
         `Automated change for Omniboard agentic run ${runKey}.`
     );
@@ -859,6 +871,71 @@ function normalizeRepositoryPath(value: string) {
 
 function toErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
+}
+
+export function resolveRunnerGitValues(
+  run: AgenticRunSummary,
+  options: { branch?: string } = {}
+) {
+  return {
+    branchName:
+      normalizeNonEmptyString(options.branch) ??
+      normalizeNonEmptyString(run.branchName) ??
+      extractPromptGitValue(run.prompt, 'branchName') ??
+      `agentic/${slug(run.runKey)}-${Date.now().toString(36)}`,
+    commitMessage:
+      normalizeNonEmptyString(run.commitMessage) ??
+      extractPromptGitValue(run.prompt, 'commitMessage') ??
+      defaultCommitMessage(run.runKey),
+  };
+}
+
+function extractPromptGitValue(
+  prompt: string | null | undefined,
+  type: 'branchName' | 'commitMessage'
+) {
+  const pattern =
+    type === 'branchName'
+      ? /^(?:branch(?:\s+name)?|git\s+branch)\s*:\s*(.+)$/i
+      : /^(?:commit(?:\s+message)?|git\s+commit\s+message)\s*:\s*(.+)$/i;
+
+  for (const line of prompt?.split(/\r?\n/) ?? []) {
+    const normalizedLine = line
+      .trim()
+      .replace(/^(?:[-+*]\s+|#{1,6}\s*)/, '')
+      .replace(/\*\*/g, '')
+      .trim();
+    const value = pattern.exec(normalizedLine)?.[1];
+    const normalizedValue = normalizeNonEmptyString(value);
+    if (normalizedValue) {
+      const unwrappedValue = normalizeNonEmptyString(
+        unwrapMarkdownValue(normalizedValue)
+      );
+      if (unwrappedValue) {
+        return unwrappedValue;
+      }
+    }
+  }
+
+  return undefined;
+}
+
+function unwrapMarkdownValue(value: string) {
+  for (const delimiter of ['`', '"', "'"]) {
+    if (value.startsWith(delimiter) && value.endsWith(delimiter)) {
+      return value.slice(1, -1).trim();
+    }
+  }
+  return value;
+}
+
+function normalizeNonEmptyString(value: string | null | undefined) {
+  const normalized = value?.trim();
+  return normalized || undefined;
+}
+
+function defaultCommitMessage(runKey: string) {
+  return `chore: complete agentic run ${runKey}`;
 }
 
 function slug(value: string) {

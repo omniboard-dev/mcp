@@ -254,6 +254,8 @@ function normalizeAgenticRunSummary(
     check: run.check ?? null,
     project: run.project ?? null,
     prompt: normalizeString(run.prompt ?? run.check?.prompt) ?? null,
+    branchName: normalizeString(run.branchName) ?? null,
+    commitMessage: normalizeString(run.commitMessage) ?? null,
     status,
     progress: run.progress ?? null,
     result: run.result,

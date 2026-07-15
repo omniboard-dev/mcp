@@ -86,6 +86,8 @@ export interface McpApiAgenticRun {
   check?: Partial<McpApiCheck> | null;
   project?: Partial<McpApiProject> | null;
   prompt?: string | null;
+  branchName?: string | null;
+  commitMessage?: string | null;
   status?: AgenticRunStatus | string | null;
   progress?: Record<string, unknown> | null;
   result?: unknown;
@@ -169,6 +171,8 @@ export interface AgenticRunSummary {
   check?: Partial<McpApiCheck> | null;
   project?: Partial<McpApiProject> | null;
   prompt?: string | null;
+  branchName?: string | null;
+  commitMessage?: string | null;
   status?: AgenticRunStatus | string | null;
   progress?: Record<string, unknown> | null;
   result?: unknown;
@@ -284,6 +288,7 @@ export interface RunnerWorkspaceState {
   repositoryUrl: string;
   localPath: string;
   branch: string;
+  commitMessage?: string;
   targetBranch: string;
   projectPath: string;
   preparedHeadSha: string;

@@ -186,9 +186,15 @@ or report progress.
 #### `omniboard_runner_prepare_agentic_run_workspace`
 
 Resolves one matching project and run, verifies repository access, clones the
-project into the runner-owned workspace, creates an agentic branch, reports
-`in_progress`, and returns the prompt, result context, workspace path, and
-agent instructions.
+project into the runner-owned workspace, resolves the branch name and commit
+message, creates the branch, reports `in_progress`, and returns the prompt,
+result context, workspace path, and agent instructions.
+
+The branch name uses an explicit tool input first, then the agentic run
+definition, a labeled value in the prompt, and finally a generated agentic
+branch name. The commit message uses the run definition, a labeled prompt
+value, and then a run-key-based default. Both resolved values are stored in the
+signed workspace state.
 
 An optional repository URL is accepted only when it identifies a registered
 repository URL for the matched Omniboard project.
@@ -201,8 +207,8 @@ repository access, pushes the prepared branch, creates or reuses the GitLab
 merge request, and reports `committed`, `pushed`, and `mr_created`
 milestones.
 
-The caller supplies the commit message and may supply the merge request title,
-description, and Git author identity.
+The prepared commit message is used by default. The caller may override it and
+may also supply the merge request title, description, and Git author identity.
 
 #### `omniboard_runner_report_agentic_run_progress`
 
