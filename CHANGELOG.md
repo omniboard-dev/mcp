@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.1.14](https://github.com/omniboard-dev/mcp/compare/v0.1.13...v0.1.14) (2026-07-15)
+
+
+### Features
+
+* add Bitbucket Data Center support ([d6d28da](https://github.com/omniboard-dev/mcp/commit/d6d28da33f9f496c04560a08088cd183d716be6e))
+
 ### [0.1.13](https://github.com/omniboard-dev/mcp/compare/v0.1.12...v0.1.13) (2026-07-14)
 
 
