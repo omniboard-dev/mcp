@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.1.15](https://github.com/omniboard-dev/mcp/compare/v0.1.14...v0.1.15) (2026-07-15)
+
+
+### Features
+
+* resolve runner git metadata from agentic runs ([39ee410](https://github.com/omniboard-dev/mcp/commit/39ee4100e4fa61807e24fd0f7967aead26375b6c))
+
 ### [0.1.14](https://github.com/omniboard-dev/mcp/compare/v0.1.13...v0.1.14) (2026-07-15)
 
 
