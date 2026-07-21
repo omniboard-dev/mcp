@@ -126,6 +126,93 @@ export async function createBranch(branch: string, targetDir: string) {
   );
 }
 
+export async function fetchBranch(
+  repositoryUrl: string,
+  branch: string,
+  targetDir: string,
+  env: NodeJS.ProcessEnv
+) {
+  validateBranch(branch);
+  await runGit(
+    [
+      '-c',
+      'credential.helper=',
+      '-c',
+      'core.hooksPath=/dev/null',
+      'fetch',
+      '--no-tags',
+      '--',
+      repositoryUrl,
+      `refs/heads/${branch}:refs/remotes/origin/${branch}`,
+    ],
+    targetDir,
+    env
+  );
+}
+
+export async function getRefCommit(
+  ref: string,
+  targetDir: string
+): Promise<string | null> {
+  try {
+    const { stdout } = await runGit(['rev-parse', '--verify', ref], targetDir);
+    return stdout.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+export function getRemoteBranchCommit(branch: string, targetDir: string) {
+  validateBranch(branch);
+  return getRefCommit(`refs/remotes/origin/${branch}`, targetDir);
+}
+
+export async function isAncestor(
+  ancestor: string,
+  descendant: string,
+  targetDir: string
+) {
+  try {
+    await runGit(
+      ['merge-base', '--is-ancestor', ancestor, descendant],
+      targetDir
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function fastForwardBranch(branch: string, targetDir: string) {
+  validateBranch(branch);
+  await runGit(
+    [
+      '-c',
+      'core.hooksPath=/dev/null',
+      'merge',
+      '--ff-only',
+      `refs/remotes/origin/${branch}`,
+    ],
+    targetDir
+  );
+}
+
+export async function checkoutRemoteBranch(branch: string, targetDir: string) {
+  validateBranch(branch);
+  await runGit(
+    [
+      '-c',
+      'core.hooksPath=/dev/null',
+      'checkout',
+      '-b',
+      branch,
+      '--track',
+      `origin/${branch}`,
+    ],
+    targetDir
+  );
+}
+
 export async function getWorkingTreeStatus(targetDir: string) {
   const { stdout } = await runGit(
     ['-c', 'core.fsmonitor=false', 'status', '--porcelain'],

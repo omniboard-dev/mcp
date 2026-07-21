@@ -5,6 +5,7 @@ import {
 } from './bitbucket-data-center.service.js';
 import {
   createGitlabMergeRequest,
+  retryGitlabPipeline,
   validateGitlabProjectAccess,
 } from './gitlab.service.js';
 
@@ -57,6 +58,26 @@ export async function createChangeRequest(
         title,
         description
       );
+  }
+}
+
+export async function retryFailedPipeline(
+  access: McpRepositoryAccess,
+  repositoryUrl: string,
+  pipelineUrl: string
+) {
+  switch (access.provider) {
+    case 'bitbucket_data_center':
+      return {
+        supported: false as const,
+        reason:
+          'Bitbucket Data Center does not expose a standard repository pipeline retry API.',
+      };
+    case 'gitlab':
+      return {
+        supported: true as const,
+        ...(await retryGitlabPipeline(access, repositoryUrl, pipelineUrl)),
+      };
   }
 }
 

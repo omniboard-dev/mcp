@@ -4,6 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 
 import {
+  AgenticRunContinuationDecision,
+  AgenticRunProjectState,
   AgenticRunSummary,
   McpRepositoryAccess,
   RunnerWorkspaceFinalizeResult,
@@ -15,18 +17,24 @@ import {
   getRunnerAgenticRun,
   listAgenticRunProjects,
   reportRunnerAgenticRunProgressSafely,
+  resolveAgenticRunContinuation,
 } from './agentic-runs.service.js';
 import {
+  checkoutRemoteBranch,
   cloneRepository,
   commitAll,
   createBranch,
+  fastForwardBranch,
+  fetchBranch,
   getCurrentBranch,
   getDefaultBranch,
   getEffectiveRepositoryUrl,
   getHeadCommit,
   getGitNetworkEnvironment,
+  getRemoteBranchCommit,
   getRepositoryPaths,
   getWorkingTreeStatus,
+  isAncestor,
   pushBranch,
 } from './git.service.js';
 import {
@@ -47,6 +55,13 @@ const RUNNER_GITIGNORE_ENTRIES = ['workspaces/', 'state/'];
 const DEFAULT_AUTHOR_NAME = 'Omniboard Agent';
 const DEFAULT_AUTHOR_EMAIL = 'agent@omniboard.dev';
 const RUNNER_STATE_VERSION = 2;
+const workspacePreparations = new Map<
+  string,
+  {
+    options: PrepareRunnerWorkspaceOptions;
+    result: Promise<RunnerWorkspacePrepareResult>;
+  }
+>();
 
 interface RunnerWorkspaceStateEnvelope {
   version: typeof RUNNER_STATE_VERSION;
@@ -72,7 +87,46 @@ export interface FinalizeRunnerWorkspaceOptions {
   authorEmail?: string;
 }
 
-export async function prepareRunnerWorkspace({
+export function prepareRunnerWorkspace(
+  options: PrepareRunnerWorkspaceOptions
+): Promise<RunnerWorkspacePrepareResult> {
+  const preparationKey = JSON.stringify([options.runKey, options.projectName]);
+  const existingPreparation = workspacePreparations.get(preparationKey);
+  if (existingPreparation) {
+    if (!hasMatchingPreparationOptions(existingPreparation.options, options)) {
+      return Promise.reject(
+        new Error(
+          'Runner workspace preparation is already in progress for run "' +
+            options.runKey +
+            '" and project "' +
+            options.projectName +
+            '" with different repository or branch options.'
+        )
+      );
+    }
+    return existingPreparation.result;
+  }
+
+  const preparation = prepareRunnerWorkspaceInternal(options).finally(() =>
+    workspacePreparations.delete(preparationKey)
+  );
+  workspacePreparations.set(preparationKey, {
+    options: { ...options },
+    result: preparation,
+  });
+  return preparation;
+}
+
+function hasMatchingPreparationOptions(
+  left: PrepareRunnerWorkspaceOptions,
+  right: PrepareRunnerWorkspaceOptions
+) {
+  return (
+    left.repositoryUrl === right.repositoryUrl && left.branch === right.branch
+  );
+}
+
+async function prepareRunnerWorkspaceInternal({
   runKey,
   projectName,
   repositoryUrl,
@@ -80,22 +134,37 @@ export async function prepareRunnerWorkspace({
 }: PrepareRunnerWorkspaceOptions): Promise<RunnerWorkspacePrepareResult> {
   let resolvedRepositoryUrl = repositoryUrl;
   let localPath: string | undefined;
-  let workspaceStateWritten = false;
+  let createdWorkspace = false;
 
   try {
+    const projectState = await api.refreshAgenticRunProjectState(
+      runKey,
+      projectName
+    );
+    const continuation = await resolveAgenticRunContinuation(projectState);
+    if (continuation.action !== 'continue') {
+      return createNonContinuablePreparation(projectState, continuation);
+    }
+
     const discovery = await listAgenticRunProjects({ runKey });
     const project = discovery.projects.find(
       (item) => item.name === projectName
     );
     if (!project) {
       throw new Error(
-        `Project "${projectName}" does not currently match run "${runKey}".`
+        'Project "' +
+          projectName +
+          '" does not currently match run "' +
+          runKey +
+          '".'
       );
     }
 
     const runResponse = await getRunnerAgenticRun(projectName, runKey);
+    const existingWorkspace = await findRunnerWorkspace(runKey, projectName);
+
     const resolvedGitValues = resolveRunnerGitValues(runResponse.run, {
-      branch,
+      branch: branch ?? projectState.progress.branch ?? undefined,
     });
     resolvedRepositoryUrl = resolveProjectRepositoryUrl(project, repositoryUrl);
 
@@ -114,40 +183,83 @@ export async function prepareRunnerWorkspace({
       effectiveRepositoryUrl
     );
 
-    const layout = await ensureRunnerLayout();
-    localPath = await fs.mkdtemp(
-      path.join(layout.workspaces, `${slug(projectName)}-`)
-    );
-    localPath = await fs.realpath(localPath);
-    await withGitCredentials(access, localPath, (env) =>
-      cloneRepository(
+    let state: RunnerWorkspaceState;
+    let resumed = false;
+    if (existingWorkspace) {
+      state = existingWorkspace.state;
+      localPath = existingWorkspace.localPath;
+      assertWorkspaceIdentity(state, runKey, projectName, localPath);
+      if (state.branch !== resolvedGitValues.branchName) {
+        throw new Error(
+          'Retained runner workspace branch "' +
+            state.branch +
+            '" does not match resolved branch "' +
+            resolvedGitValues.branchName +
+            '".'
+        );
+      }
+      if (
+        repositoryIdentity(state.repositoryUrl) !==
+          repositoryIdentity(resolvedRepositoryUrl) ||
+        state.projectPath !== repository.repositoryId
+      ) {
+        throw new Error(
+          'Retained runner workspace repository identity no longer matches the project.'
+        );
+      }
+      await reconcileRunnerWorkspace(
+        state,
+        localPath,
         effectiveRepositoryUrl,
-        localPath!,
-        path.dirname(localPath!),
-        env
-      )
-    );
-    await assertGitWorkspaceIdentity(localPath);
-    const targetBranch = await getDefaultBranch(localPath);
-    await createBranch(resolvedGitValues.branchName, localPath);
-    const preparedHeadSha = (await getHeadCommit(localPath)).sha;
+        access,
+        projectState
+      );
+      resumed = true;
+    } else {
+      const layout = await ensureRunnerLayout();
+      localPath = await fs.mkdtemp(
+        path.join(layout.workspaces, slug(projectName) + '-')
+      );
+      createdWorkspace = true;
+      localPath = await fs.realpath(localPath);
+      await withGitCredentials(access, localPath, (env) =>
+        cloneRepository(
+          effectiveRepositoryUrl,
+          localPath!,
+          path.dirname(localPath!),
+          env
+        )
+      );
+      await assertGitWorkspaceIdentity(localPath);
+      const targetBranch = await getDefaultBranch(localPath);
+      const remoteBranchCommit = await getRemoteBranchCommit(
+        resolvedGitValues.branchName,
+        localPath
+      );
+      if (remoteBranchCommit) {
+        await checkoutRemoteBranch(resolvedGitValues.branchName, localPath);
+        resumed = true;
+      } else {
+        await createBranch(resolvedGitValues.branchName, localPath);
+      }
+      const preparedHeadSha = (await getHeadCommit(localPath)).sha;
 
-    const state: RunnerWorkspaceState = {
-      runKey,
-      checkName: runResponse.run.checkName,
-      projectName,
-      repositoryUrl: resolvedRepositoryUrl,
-      localPath,
-      branch: resolvedGitValues.branchName,
-      commitMessage: resolvedGitValues.commitMessage,
-      targetBranch,
-      projectPath: repository.repositoryId,
-      preparedHeadSha,
-      provider: access.provider,
-      apiBaseUrl: access.apiBaseUrl,
-    };
-    await writeRunnerState(state);
-    workspaceStateWritten = true;
+      state = {
+        runKey,
+        checkName: runResponse.run.checkName,
+        projectName,
+        repositoryUrl: resolvedRepositoryUrl,
+        localPath,
+        branch: resolvedGitValues.branchName,
+        commitMessage: resolvedGitValues.commitMessage,
+        targetBranch,
+        projectPath: repository.repositoryId,
+        preparedHeadSha,
+        provider: access.provider,
+        apiBaseUrl: access.apiBaseUrl,
+      };
+      await writeRunnerState(state);
+    }
 
     const progressReport = await reportRunnerAgenticRunProgressSafely(
       runKey,
@@ -155,12 +267,15 @@ export async function prepareRunnerWorkspace({
       {
         status: 'in_progress',
         repositoryUrl: resolvedRepositoryUrl,
-        localPath,
-        branch: resolvedGitValues.branchName,
-        notes: `Prepared dedicated runner workspace for "${projectName}".`,
+        localPath: state.localPath,
+        branch: state.branch,
+        notes: resumed
+          ? 'Continued dedicated runner workspace for "' + projectName + '".'
+          : 'Prepared dedicated runner workspace for "' + projectName + '".',
         metadata: {
           mcpTool: 'omniboard_runner_prepare_agentic_run_workspace',
-          targetBranch,
+          targetBranch: state.targetBranch,
+          resumed,
         },
       }
     );
@@ -169,20 +284,21 @@ export async function prepareRunnerWorkspace({
       run: runResponse.run,
       project,
       result: runResponse.result,
+      projectState,
+      continuation,
       workspace: state,
       prompt: runResponse.run.prompt ?? null,
-      instructions: [
-        `Work only inside ${localPath}.`,
-        'Use the returned prompt and check result as the source of truth.',
-        'Inspect the project and implement the smallest coherent change that resolves the check.',
-        'Run relevant tests, lint, or build commands before finalizing.',
-        `When ready, call omniboard_runner_finalize_agentic_run_workspace with runKey "${runKey}", projectName "${projectName}", and localPath "${localPath}". The prepared commit message is "${resolvedGitValues.commitMessage}".`,
-      ],
+      instructions: createWorkspaceInstructions(
+        runKey,
+        projectName,
+        state,
+        continuation
+      ),
       progressReport,
     };
   } catch (error) {
     let cleanupError: unknown;
-    if (localPath && !workspaceStateWritten) {
+    if (localPath && createdWorkspace) {
       try {
         await fs.rm(localPath, { recursive: true, force: true });
         localPath = undefined;
@@ -192,14 +308,14 @@ export async function prepareRunnerWorkspace({
     }
 
     const failureMessage = cleanupError
-      ? `${toErrorMessage(error)} Cleanup also failed: ${toErrorMessage(
-          cleanupError
-        )}`
+      ? toErrorMessage(error) +
+        ' Cleanup also failed: ' +
+        toErrorMessage(cleanupError)
       : toErrorMessage(error);
     await reportRunnerAgenticRunProgressSafely(runKey, projectName, {
       status: 'failed',
       repositoryUrl: resolvedRepositoryUrl ?? null,
-      localPath: localPath ?? null,
+      localPath,
       error: failureMessage,
       notes: 'Dedicated runner workspace preparation failed.',
       metadata: {
@@ -222,6 +338,20 @@ export async function finalizeRunnerWorkspace({
 }: FinalizeRunnerWorkspaceOptions): Promise<RunnerWorkspaceFinalizeResult> {
   const { state, localPath } = await readRunnerState(requestedLocalPath);
   assertWorkspaceIdentity(state, runKey, projectName, localPath);
+  const projectState = await api.refreshAgenticRunProjectState(
+    runKey,
+    projectName
+  );
+  const continuation = await resolveAgenticRunContinuation(projectState);
+  if (continuation.action !== 'continue') {
+    throw new Error(
+      `Runner workspace finalization is not permitted while the continuation decision is "${
+        continuation.action
+      }" (${continuation.reason}). ${continuation.instructions.join(' ')}`
+    );
+  }
+  assertFinalizationProjectStateMatchesWorkspace(state, projectState);
+
   const resolvedCommitMessage =
     normalizeNonEmptyString(commitMessage) ??
     state.commitMessage ??
@@ -343,6 +473,225 @@ export async function finalizeRunnerWorkspace({
     );
     throw error;
   }
+}
+
+function assertFinalizationProjectStateMatchesWorkspace(
+  state: RunnerWorkspaceState,
+  projectState: AgenticRunProjectState
+) {
+  if (
+    projectState.run.runKey !== state.runKey ||
+    projectState.project.name !== state.projectName
+  ) {
+    throw new Error(
+      'Refreshed run and project identity does not match the runner workspace.'
+    );
+  }
+  if (
+    projectState.progress.branch &&
+    projectState.progress.branch !== state.branch
+  ) {
+    throw new Error(
+      'Refreshed provider branch "' +
+        projectState.progress.branch +
+        '" does not match runner workspace branch "' +
+        state.branch +
+        '".'
+    );
+  }
+
+  const repositoryUrls = [
+    projectState.project.repositoryUrl,
+    ...(projectState.project.repositoryUrls ?? []),
+  ].filter((value): value is string => Boolean(value));
+  if (
+    repositoryUrls.length > 0 &&
+    !repositoryUrls.some(
+      (repositoryUrl) =>
+        repositoryIdentity(repositoryUrl) ===
+        repositoryIdentity(state.repositoryUrl)
+    )
+  ) {
+    throw new Error(
+      'Refreshed project repository does not match the runner workspace repository.'
+    );
+  }
+}
+
+function createNonContinuablePreparation(
+  projectState: AgenticRunProjectState,
+  continuation: AgenticRunContinuationDecision
+): RunnerWorkspacePrepareResult {
+  return {
+    run: projectState.run,
+    project: {
+      id: projectState.project.id,
+      name: projectState.project.name,
+      repositoryUrl: projectState.project.repositoryUrl,
+      repositoryUrls: projectState.project.repositoryUrls,
+    },
+    projectState,
+    continuation,
+    prompt: projectState.run.prompt ?? null,
+    instructions: continuation.instructions,
+  };
+}
+
+function createWorkspaceInstructions(
+  runKey: string,
+  projectName: string,
+  state: RunnerWorkspaceState,
+  continuation: AgenticRunContinuationDecision
+) {
+  return [
+    'Work only inside ' + state.localPath + '.',
+    'Use the returned prompt and check result as the source of truth.',
+    ...continuation.instructions,
+    'Inspect the existing branch and implement the smallest coherent change that resolves the check or provider failure.',
+    'Run relevant tests, lint, or build commands before finalizing.',
+    'When ready, call omniboard_runner_finalize_agentic_run_workspace with runKey "' +
+      runKey +
+      '", projectName "' +
+      projectName +
+      '", and localPath "' +
+      state.localPath +
+      '". The prepared commit message is "' +
+      (state.commitMessage ?? defaultCommitMessage(runKey)) +
+      '".',
+  ];
+}
+
+async function findRunnerWorkspace(runKey: string, projectName: string) {
+  const root = path.resolve(process.cwd(), RUNNER_ROOT);
+  const workspaces = path.join(root, RUNNER_WORKSPACES_DIRECTORY);
+  const stateDirectory = path.join(root, RUNNER_STATE_DIRECTORY);
+  let entries;
+  try {
+    entries = await fs.readdir(stateDirectory, { withFileTypes: true });
+    await Promise.all([
+      assertRealDirectory(root),
+      assertRealDirectory(workspaces),
+      assertRealDirectory(stateDirectory),
+    ]);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return null;
+    }
+    throw error;
+  }
+  const candidates: Array<{
+    state: RunnerWorkspaceState;
+    localPath: string;
+    modifiedAt: number;
+  }> = [];
+
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith('.json')) {
+      continue;
+    }
+
+    const stateFile = path.join(stateDirectory, entry.name);
+    try {
+      const [serialized, stats] = await Promise.all([
+        fs.readFile(stateFile, 'utf8'),
+        fs.stat(stateFile),
+      ]);
+      const envelope = JSON.parse(serialized) as unknown;
+      assertRunnerStateEnvelope(envelope);
+      if (
+        envelope.state.runKey !== runKey ||
+        envelope.state.projectName !== projectName
+      ) {
+        continue;
+      }
+      const localPath = await assertRunnerWorkspacePath(
+        workspaces,
+        envelope.state.localPath
+      );
+      candidates.push({
+        state: envelope.state,
+        localPath,
+        modifiedAt: stats.mtimeMs,
+      });
+    } catch {
+      // Invalid, deleted, or unauthenticated state is never reused.
+    }
+  }
+
+  candidates.sort((left, right) => right.modifiedAt - left.modifiedAt);
+  return candidates[0] ?? null;
+}
+
+async function reconcileRunnerWorkspace(
+  state: RunnerWorkspaceState,
+  localPath: string,
+  repositoryUrl: string,
+  access: McpRepositoryAccess,
+  projectState: AgenticRunProjectState
+) {
+  await assertGitWorkspaceIdentity(localPath);
+  await assertCurrentRunnerBranch(state, localPath);
+  if (
+    projectState.progress.branch &&
+    projectState.progress.branch !== state.branch
+  ) {
+    throw new Error(
+      'Provider branch "' +
+        projectState.progress.branch +
+        '" does not match retained workspace branch "' +
+        state.branch +
+        '".'
+    );
+  }
+
+  const workingTreeStatus = await getWorkingTreeStatus(localPath);
+  let head = await getHeadCommit(localPath);
+  try {
+    await withGitCredentials(access, localPath, (env) =>
+      fetchBranch(repositoryUrl, state.branch, localPath, env)
+    );
+  } catch (error) {
+    if (projectState.progress.mergeRequestUrl) {
+      throw new Error(
+        'Unable to refresh the existing provider branch: ' +
+          toErrorMessage(error)
+      );
+    }
+  }
+
+  const remoteCommit = await getRemoteBranchCommit(state.branch, localPath);
+  const hasVerifiedLocalHead =
+    head.sha === state.preparedHeadSha || head.sha === state.commitSha;
+  if (!remoteCommit && !hasVerifiedLocalHead) {
+    throw new Error(
+      'The retained workspace contains an unverified local commit.'
+    );
+  }
+  if (remoteCommit && remoteCommit !== head.sha) {
+    if (await isAncestor(head.sha, remoteCommit, localPath)) {
+      if (workingTreeStatus) {
+        throw new Error(
+          'The remote branch advanced while the retained workspace has local changes.'
+        );
+      }
+      await fastForwardBranch(state.branch, localPath);
+      head = await getHeadCommit(localPath);
+    } else if (await isAncestor(remoteCommit, head.sha, localPath)) {
+      if (!hasVerifiedLocalHead) {
+        throw new Error(
+          'The retained workspace contains an unverified local commit.'
+        );
+      }
+    } else {
+      throw new Error(
+        'The retained workspace and remote provider branch have diverged.'
+      );
+    }
+  }
+
+  state.preparedHeadSha = head.sha;
+  state.commitSha = undefined;
+  await writeRunnerState(state);
 }
 
 async function createRunnerCommit(

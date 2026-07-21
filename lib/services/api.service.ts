@@ -6,11 +6,13 @@ import {
   MCP_RUNS_ENDPOINT,
   MCP_MATCHED_PROJECTS_ENDPOINT,
   MCP_REPOSITORY_ACCESS_ENDPOINT,
+  MCP_RUN_PROJECT_STATE_REFRESH_ENDPOINT,
   SETTINGS_ENDPOINT,
 } from '../consts.js';
 import {
   AgenticRunProgressUpsertInput,
   AgenticRunProgressUpsertResponse,
+  AgenticRunProjectState,
   AgenticRunResponse,
   AgenticRunsResponse,
   AgenticRunMatchedProjectsResponse,
@@ -162,6 +164,15 @@ export const getAgenticRunMatchedProjects = async ({
   };
 };
 
+export const refreshAgenticRunProjectState = (
+  runKey: string,
+  projectName: string
+): Promise<AgenticRunProjectState> =>
+  request<AgenticRunProjectState>(MCP_RUN_PROJECT_STATE_REFRESH_ENDPOINT, {
+    method: 'POST',
+    body: JSON.stringify({ runKey, projectName }),
+  });
+
 export const getRepositoryAccess = (
   repositoryUrl: string
 ): Promise<McpRepositoryAccess> =>
@@ -301,5 +312,6 @@ function normalizeMatchedProject(
     result: project.result ?? null,
     repositoryUrl: project.repositoryUrl ?? null,
     repositoryUrls: project.repositoryUrls ?? [],
+    progress: project.progress ?? null,
   };
 }

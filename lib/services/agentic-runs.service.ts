@@ -1,15 +1,25 @@
 import {
+  AgenticRunContinuationDecision,
+  AgenticRunPipelineRetryResult,
   AgenticRunProgressReportResult,
   AgenticRunProgressStatus,
   AgenticRunProgressUpsertInput,
   AgenticRunMatchedProjectsResponse,
+  AgenticRunProjectState,
   AgenticRunResponse,
   AgenticRunsResponse,
   RunnerAgenticRunsResponse,
   AgenticRunSummary,
 } from '../interface.js';
 import * as api from './api.service.js';
+import { getAgenticRunContinuationDecision } from './agentic-run-continuation.service.js';
 import { getOmniboardProject } from './omniboard-context.service.js';
+import { retryFailedPipeline } from './source-control.service.js';
+
+const pipelineRetryAttempts = new Map<
+  string,
+  Promise<AgenticRunPipelineRetryResult>
+>();
 
 export interface ReportAgenticRunProgressOptions {
   status?: AgenticRunProgressStatus;
@@ -62,13 +72,50 @@ export async function getRunnerAgenticRun(
   return api.getAgenticRun({ name: projectName, names: [projectName] }, runKey);
 }
 
+export async function resolveAgenticRunContinuation(
+  projectState: AgenticRunProjectState
+): Promise<AgenticRunContinuationDecision> {
+  const continuation = getAgenticRunContinuationDecision(projectState);
+  if (continuation.reason !== 'infrastructure_pipeline_failure') {
+    return continuation;
+  }
+
+  const pipelineRetry = await retryInfrastructurePipeline(projectState);
+  return {
+    ...continuation,
+    instructions: [
+      ...continuation.instructions,
+      formatPipelineRetryInstruction(pipelineRetry),
+    ],
+    pipelineRetry,
+  };
+}
+
 export async function getAgenticRun(
   runKey: string
 ): Promise<AgenticRunResponse> {
-  const response = await api.getAgenticRun(await getOmniboardProject(), runKey);
+  const project = await getOmniboardProject();
+  const projectState = await api.refreshAgenticRunProjectState(
+    runKey,
+    project.name
+  );
+  const continuation = await resolveAgenticRunContinuation(projectState);
+  if (continuation.action !== 'continue') {
+    return withAgentContext({
+      project: {
+        id: projectState.project.id,
+        name: projectState.project.name,
+      },
+      run: projectState.run,
+      projectState,
+      continuation,
+    });
+  }
+
+  const response = await api.getAgenticRun(project, runKey);
   const progressReport = await reportAgenticRunProgressSafely(runKey, {
     status: 'in_progress',
-    notes: `Started agentic run "${runKey}".`,
+    notes: `Started or continued agentic run "${runKey}".`,
     metadata: {
       mcpTool: 'omniboard_local_get_agentic_run',
     },
@@ -76,6 +123,8 @@ export async function getAgenticRun(
 
   return withAgentContext({
     ...response,
+    projectState,
+    continuation,
     progressReport,
   });
 }
@@ -104,19 +153,19 @@ export async function reportRunnerAgenticRunProgress(
     runKey,
     projectName,
     status: options.status,
-    repositoryUrl: options.repositoryUrl ?? null,
-    localPath: options.localPath ?? null,
-    branch: options.branch ?? null,
-    commitSha: options.commitSha ?? null,
-    mergeRequestUrl: options.mergeRequestUrl ?? null,
-    mergeRequestState: options.mergeRequestState ?? null,
-    mergeRequestDetailedStatus: options.mergeRequestDetailedStatus ?? null,
-    pipelineStatus: options.pipelineStatus ?? null,
-    pipelineUrl: options.pipelineUrl ?? null,
-    pipelineFailureSummary: options.pipelineFailureSummary ?? null,
-    error: options.error ?? null,
-    notes: options.notes ?? null,
-    verification: options.verification ?? null,
+    repositoryUrl: options.repositoryUrl,
+    localPath: options.localPath,
+    branch: options.branch,
+    commitSha: options.commitSha,
+    mergeRequestUrl: options.mergeRequestUrl,
+    mergeRequestState: options.mergeRequestState,
+    mergeRequestDetailedStatus: options.mergeRequestDetailedStatus,
+    pipelineStatus: options.pipelineStatus,
+    pipelineUrl: options.pipelineUrl,
+    pipelineFailureSummary: options.pipelineFailureSummary,
+    error: options.error,
+    notes: options.notes,
+    verification: options.verification,
     metadata: {
       ...(options.metadata ?? {}),
       executionMode: 'dedicated-runner',
@@ -163,10 +212,29 @@ export async function reportAgenticRunProgressSafely(
   }
 }
 
-export function createAgenticRunAgentContext(run: AgenticRunSummary) {
+export function createAgenticRunAgentContext(
+  run: AgenticRunSummary,
+  continuation?: AgenticRunContinuationDecision
+) {
+  const canContinue = !continuation || continuation.action === 'continue';
+  if (!canContinue) {
+    return {
+      goal: `Do not continue Omniboard agentic run "${run.runKey}" while its continuation decision is "${continuation.action}".`,
+      instructions: continuation.instructions,
+      validation: {
+        allowed: false,
+        optional: true,
+        requiredEnv: 'OMNIBOARD_API_KEY' as const,
+        tool: 'omniboard_local_validate_agentic_run' as const,
+        skipWhenMissingEnv: true,
+      },
+    };
+  }
+
   return {
     goal: `Complete Omniboard agentic run "${run.runKey}" for check "${run.checkName}".`,
     instructions: [
+      ...(continuation?.instructions ?? []),
       'Use the agentic run prompt, check metadata, and result details as the primary context for the change.',
       'Inspect the local codebase before editing and make the smallest coherent change that resolves the agentic check.',
       `Report meaningful progress with \`omniboard_local_report_agentic_run_progress\` using runKey "${run.runKey}" when work is implemented, needs input, verified, committed, pushed, MR created, merged, blocked, or failed.`,
@@ -175,6 +243,7 @@ export function createAgenticRunAgentContext(run: AgenticRunSummary) {
       'If `OMNIBOARD_API_KEY` is not available, skip analyzer validation and report that it was skipped.',
     ],
     validation: {
+      allowed: true,
       optional: true,
       requiredEnv: 'OMNIBOARD_API_KEY' as const,
       tool: 'omniboard_local_validate_agentic_run' as const,
@@ -186,7 +255,10 @@ export function createAgenticRunAgentContext(run: AgenticRunSummary) {
 function withAgentContext(response: AgenticRunResponse): AgenticRunResponse {
   return {
     ...response,
-    agentContext: createAgenticRunAgentContext(response.run),
+    agentContext: createAgenticRunAgentContext(
+      response.run,
+      response.continuation
+    ),
   };
 }
 
@@ -203,16 +275,16 @@ async function createAgenticRunProgressPayload(
     repositoryUrl: options.repositoryUrl ?? project.repository ?? null,
     localPath: options.localPath ?? process.cwd(),
     branch: options.branch ?? project.branch ?? null,
-    commitSha: options.commitSha ?? null,
-    mergeRequestUrl: options.mergeRequestUrl ?? null,
-    mergeRequestState: options.mergeRequestState ?? null,
-    mergeRequestDetailedStatus: options.mergeRequestDetailedStatus ?? null,
-    pipelineStatus: options.pipelineStatus ?? null,
-    pipelineUrl: options.pipelineUrl ?? null,
-    pipelineFailureSummary: options.pipelineFailureSummary ?? null,
-    error: options.error ?? null,
-    notes: options.notes ?? null,
-    verification: options.verification ?? null,
+    commitSha: options.commitSha,
+    mergeRequestUrl: options.mergeRequestUrl,
+    mergeRequestState: options.mergeRequestState,
+    mergeRequestDetailedStatus: options.mergeRequestDetailedStatus,
+    pipelineStatus: options.pipelineStatus,
+    pipelineUrl: options.pipelineUrl,
+    pipelineFailureSummary: options.pipelineFailureSummary,
+    error: options.error,
+    notes: options.notes,
+    verification: options.verification,
     metadata: {
       ...(options.metadata ?? {}),
       executionMode: 'developer-local',
@@ -222,6 +294,91 @@ async function createAgenticRunProgressPayload(
     },
     lastUpdateSource: 'mcp',
   });
+}
+
+async function retryInfrastructurePipeline(
+  projectState: AgenticRunProjectState
+): Promise<AgenticRunPipelineRetryResult> {
+  const pipelineUrl = projectState.progress.pipelineUrl ?? undefined;
+  if (!pipelineUrl) {
+    return {
+      attempted: false,
+      retried: false,
+      reason: 'Provider state did not include a pipeline URL.',
+    };
+  }
+  const repositoryUrl =
+    projectState.project.repositoryUrl ??
+    projectState.project.repositoryUrls?.[0];
+  if (!repositoryUrl) {
+    return {
+      attempted: false,
+      retried: false,
+      pipelineUrl,
+      reason: 'The project did not include a repository URL.',
+    };
+  }
+
+  const retryKey = projectState.project.id + ':' + pipelineUrl;
+  const existingRetry = pipelineRetryAttempts.get(retryKey);
+  if (existingRetry) return existingRetry;
+
+  const retry = (async (): Promise<AgenticRunPipelineRetryResult> => {
+    try {
+      const access = await api.getRepositoryAccess(repositoryUrl);
+      const result = await retryFailedPipeline(
+        access,
+        repositoryUrl,
+        pipelineUrl
+      );
+      if (!result.supported) {
+        return {
+          attempted: false,
+          retried: false,
+          provider: access.provider,
+          pipelineUrl,
+          reason: result.reason,
+        };
+      }
+      return {
+        attempted: true,
+        retried: true,
+        provider: access.provider,
+        pipelineId: result.pipelineId,
+        pipelineUrl: result.pipelineUrl,
+        status: result.status,
+      };
+    } catch (error) {
+      return {
+        attempted: true,
+        retried: false,
+        pipelineUrl,
+        reason: error instanceof Error ? error.message : String(error),
+      };
+    }
+  })().finally(() => pipelineRetryAttempts.delete(retryKey));
+  pipelineRetryAttempts.set(retryKey, retry);
+  return retry;
+}
+
+function formatPipelineRetryInstruction(
+  pipelineRetry: AgenticRunPipelineRetryResult
+) {
+  if (pipelineRetry.retried) {
+    return 'The infrastructure pipeline retry was requested successfully. Wait for its refreshed status.';
+  }
+  if (pipelineRetry.attempted) {
+    return (
+      'The infrastructure pipeline retry could not be completed: ' +
+      (pipelineRetry.reason ?? 'unknown provider error') +
+      ' Wait for provider recovery or retry later.'
+    );
+  }
+  return (
+    'Automatic infrastructure pipeline retry is unavailable: ' +
+    (pipelineRetry.reason ?? 'the provider does not support it') +
+    ' Wait for an external retry or provider update.'
+  );
 }
 
 function withoutUndefined<T extends Record<string, unknown>>(value: T): T {

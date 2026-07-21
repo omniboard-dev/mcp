@@ -68,8 +68,10 @@ local workspace.
 This mode does not create or manage another checkout. The connected agent owns
 the normal development workflow: inspect the project, edit the current
 workspace, run verification, and use the local progress tools to report
-milestones. Analyzer validation is available only when
-`OMNIBOARD_API_KEY` is configured.
+milestones. Local and dedicated modes use the same provider-refreshed
+continuation decision and agent instructions; they differ only in how the
+working checkout is obtained. Analyzer validation is available only when
+`OMNIBOARD_API_KEY` is configured and the continuation decision permits work.
 
 ### Tools
 
@@ -81,7 +83,9 @@ the list to one agentic check.
 #### `omniboard_local_get_agentic_run`
 
 Returns one agentic run by `runKey`, including its prompt, progress, and agent
-instructions. It also reports the run as `in_progress` idempotently.
+instructions. It refreshes provider state, returns the shared continuation
+decision, and reports the run as `in_progress` idempotently only when that
+decision permits work.
 
 #### `omniboard_local_report_agentic_run_progress`
 
@@ -108,9 +112,12 @@ agentic work across projects. A scheduler, queue worker, CI job, cron process, o
 similar coordinator selects runs and projects. Scheduling and concurrency stay
 outside the MCP server.
 
-The MCP server prepares and finalizes runner-owned checkouts. The connected
-coding agent performs the requested code change inside the returned workspace
-and runs the relevant project verification before finalization.
+The MCP server prepares and finalizes runner-owned checkouts. Before preparation,
+it refreshes the selected run and project against its Git provider and decides
+whether to continue from the canonical Omniboard progress status and provider
+metadata. The connected coding agent performs the requested code change inside
+the returned workspace and runs the relevant project verification before
+finalization.
 
 ### Workspace layout
 
@@ -141,7 +148,9 @@ the same MCP key that prepared them.
    the scheduler already supplies a run key.
 2. Call `omniboard_runner_list_agentic_run_projects` for the selected run.
 3. Select a project and call
-   `omniboard_runner_prepare_agentic_run_workspace`.
+   `omniboard_runner_prepare_agentic_run_workspace`. Preparation refreshes
+   only that run and project against its Git provider before deciding whether
+   work should continue.
 4. Give the returned prompt, result context, and workspace path to the connected
    coding agent.
 5. Run the relevant tests, lint, or build commands inside that workspace.
@@ -185,10 +194,16 @@ or report progress.
 
 #### `omniboard_runner_prepare_agentic_run_workspace`
 
-Resolves one matching project and run, verifies repository access, clones the
-project into the runner-owned workspace, resolves the branch name and commit
-message, creates the branch, reports `in_progress`, and returns the prompt,
-result context, workspace path, and agent instructions.
+Resolves one matching project and run, refreshes its merge request and pipeline
+state, and applies the shared continuation logic to canonical progress. If
+work should continue, it verifies repository access, safely reuses a retained
+signed checkout or resumes the existing remote branch, reports `in_progress`,
+and returns the prompt, result context, provider diagnostics, workspace path,
+and agent instructions. Merged or otherwise non-actionable state returns without
+a workspace. Failed application pipelines remain actionable; infrastructure-only
+pipeline failures remain non-actionable for code changes. When provider metadata and
+credentials permit it, MCP requests a pipeline retry and returns `wait` until
+the refreshed provider status becomes actionable.
 
 The branch name uses an explicit tool input first, then the agentic run
 definition, a labeled value in the prompt, and finally a generated agentic
@@ -206,6 +221,12 @@ verified the change. It creates or resumes the runner commit, retrieves fresh
 repository access, pushes the prepared branch, creates or reuses the GitLab
 merge request, and reports `committed`, `pushed`, and `mr_created`
 milestones.
+
+Before touching the checkout, finalization refreshes provider state and applies
+the same continuation decision used by preparation and local execution. It also
+verifies that the refreshed branch and repository still match the signed
+workspace state. A `wait` or `stop` decision aborts finalization before Git
+or provider state is changed.
 
 The prepared commit message is used by default. The caller may override it and
 may also supply the merge request title, description, and Git author identity.

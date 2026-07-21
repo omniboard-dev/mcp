@@ -68,6 +68,7 @@ export interface McpApiMatchedProject {
   result?: unknown;
   repositoryUrl?: string | null;
   repositoryUrls?: string[];
+  progress?: AgenticRunProjectProgress | null;
 }
 
 export interface McpApiMatchedProjectsResponse {
@@ -102,6 +103,7 @@ export interface AgenticRunAgentContext {
   goal: string;
   instructions: string[];
   validation: {
+    allowed: boolean;
     optional: boolean;
     requiredEnv: 'OMNIBOARD_API_KEY';
     tool: 'omniboard_local_validate_agentic_run';
@@ -124,6 +126,7 @@ export interface AgenticRunValidationResponse {
   stdout?: string;
   stderr?: string;
   generatedJsonCleanedUp: boolean;
+  continuation?: AgenticRunContinuationDecision;
   progressReport?: AgenticRunProgressReportResult;
 }
 
@@ -144,6 +147,8 @@ export interface AgenticRunResponse {
   result?: unknown;
   agentContext?: AgenticRunAgentContext;
   progressReport?: AgenticRunProgressReportResult;
+  projectState?: AgenticRunProjectState;
+  continuation?: AgenticRunContinuationDecision;
 }
 
 export interface AgenticRunMatchedProject {
@@ -155,6 +160,7 @@ export interface AgenticRunMatchedProject {
   result?: unknown;
   repositoryUrl?: string | null;
   repositoryUrls?: string[];
+  progress?: AgenticRunProjectProgress | null;
 }
 
 export interface AgenticRunMatchedProjectsResponse {
@@ -208,6 +214,80 @@ export const AGENTIC_RUN_PROGRESS_STATUS_VALUES = [
 
 export type AgenticRunProgressStatus =
   (typeof AGENTIC_RUN_PROGRESS_STATUS_VALUES)[number];
+
+export interface AgenticRunProviderPipelineDiagnostic {
+  name: string;
+  stage?: string | null;
+  status: string;
+  failureReason?: string | null;
+  url?: string | null;
+  traceExcerpt?: string | null;
+}
+
+export interface AgenticRunProjectProgress {
+  status: AgenticRunProgressStatus;
+  branch?: string | null;
+  commitSha?: string | null;
+  mergeRequestUrl?: string | null;
+  mergeRequestState?: string | null;
+  mergeRequestDetailedStatus?: string | null;
+  pipelineStatus?: string | null;
+  pipelineUrl?: string | null;
+  pipelineFailureSummary?: string | null;
+  providerSyncError?: string | null;
+  [key: string]: unknown;
+}
+
+export interface AgenticRunProjectState {
+  run: AgenticRunSummary;
+  project: {
+    id: number;
+    name: string;
+    currentlyMatchesCheck: boolean;
+    repositoryUrl?: string | null;
+    repositoryUrls?: string[];
+  };
+  progress: AgenticRunProjectProgress;
+  providerSync: {
+    attempted: boolean;
+    success: boolean;
+    error?: string | null;
+    diagnostics: AgenticRunProviderPipelineDiagnostic[];
+  };
+}
+
+export type AgenticRunContinuationAction = 'continue' | 'wait' | 'stop';
+
+export type AgenticRunContinuationReason =
+  | 'active_work'
+  | 'actionable_merge_block'
+  | 'actionable_review_feedback'
+  | 'application_pipeline_failure'
+  | 'change_merged'
+  | 'infrastructure_pipeline_failure'
+  | 'project_no_longer_matches'
+  | 'provider_sync_failed'
+  | 'retry_failed_work'
+  | 'unsupported_progress_status'
+  | 'waiting_for_provider_activity';
+
+export interface AgenticRunPipelineRetryResult {
+  attempted: boolean;
+  retried: boolean;
+  provider?: McpRepositoryAccess['provider'];
+  pipelineId?: number;
+  pipelineUrl?: string;
+  status?: string;
+  reason?: string;
+}
+
+export interface AgenticRunContinuationDecision {
+  action: AgenticRunContinuationAction;
+  reason: AgenticRunContinuationReason;
+  instructions: string[];
+  diagnostics: string[];
+  pipelineRetry?: AgenticRunPipelineRetryResult;
+}
 
 export interface AgenticRunProgressUpsertInput {
   runKey: string;
@@ -301,10 +381,12 @@ export interface RunnerWorkspacePrepareResult {
   run: AgenticRunSummary;
   project: AgenticRunMatchedProject;
   result?: unknown;
-  workspace: RunnerWorkspaceState;
+  projectState: AgenticRunProjectState;
+  continuation: AgenticRunContinuationDecision;
+  workspace?: RunnerWorkspaceState;
   prompt: string | null;
   instructions: string[];
-  progressReport: AgenticRunProgressReportResult;
+  progressReport?: AgenticRunProgressReportResult;
 }
 
 export interface RunnerWorkspaceFinalizeResult {

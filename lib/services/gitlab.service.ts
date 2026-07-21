@@ -175,6 +175,66 @@ export async function createGitlabMergeRequest(
   );
 }
 
+export async function retryGitlabPipeline(
+  access: GitlabRepositoryAccess,
+  repositoryUrl: string,
+  pipelineUrl: string
+) {
+  const apiBaseUrl = resolveGitlabApiBaseUrl(access.apiBaseUrl);
+  const projectPath = resolveGitlabProjectPath(
+    access,
+    repositoryUrl,
+    apiBaseUrl
+  );
+  let pipeline: URL;
+  try {
+    pipeline = new URL(pipelineUrl);
+  } catch {
+    throw new Error(`Invalid GitLab pipeline URL "${pipelineUrl}".`);
+  }
+  if (pipeline.username || pipeline.password) {
+    throw new Error('GitLab pipeline URLs must not contain credentials.');
+  }
+  if (pipeline.host.toLowerCase() !== normalizeGitlabHost(access.host)) {
+    throw new Error(
+      `GitLab pipeline host "${pipeline.host}" does not match credential host "${access.host}".`
+    );
+  }
+  const pipelineIdMatch = /\/pipelines\/(\d+)(?:\/|$)/.exec(pipeline.pathname);
+  if (!pipelineIdMatch) {
+    throw new Error(
+      `GitLab pipeline URL "${pipelineUrl}" does not include a numeric pipeline ID.`
+    );
+  }
+
+  const pipelineId = Number(pipelineIdMatch[1]);
+  const endpoint = `${apiBaseUrl}/projects/${encodeURIComponent(
+    projectPath
+  )}/pipelines/${pipelineId}/retry`;
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: { 'PRIVATE-TOKEN': access.token },
+  });
+  if (!response.ok) {
+    throw new Error(
+      `GitLab pipeline retry failed with ${response.status} ${
+        response.statusText
+      }: ${await readError(response)}`
+    );
+  }
+
+  const retriedPipeline = (await response.json()) as {
+    id?: number;
+    status?: string;
+    web_url?: string;
+  };
+  return {
+    pipelineId: retriedPipeline.id ?? pipelineId,
+    pipelineUrl: retriedPipeline.web_url ?? pipelineUrl,
+    status: retriedPipeline.status,
+  };
+}
+
 async function findOpenMergeRequest(
   endpoint: string,
   token: string,
@@ -288,6 +348,16 @@ function normalizeProjectPath(projectPath: unknown) {
     throw new Error(`Invalid GitLab project path "${projectPath}".`);
   }
   return normalized;
+}
+
+function normalizeGitlabHost(value: string) {
+  try {
+    return new URL(
+      value.includes('://') ? value : `https://${value}`
+    ).host.toLowerCase();
+  } catch {
+    throw new Error(`Invalid GitLab credential host "${value}".`);
+  }
 }
 
 function resolveGitlabApiBaseUrl(value: string) {

@@ -19,11 +19,25 @@ export async function validateAgenticRun(
 ): Promise<AgenticRunValidationResponse> {
   const apiKey = process.env.OMNIBOARD_API_KEY;
   const outputPath = path.resolve(process.cwd(), OUTPUT_PATH);
-  const { run } = await getAgenticRun(runKey);
+  const { run, continuation } = await getAgenticRun(runKey);
   const checkName = run.checkName;
   const command = `npx @omniboard/analyzer --ak <OMNIBOARD_API_KEY> --cp ${shellQuote(
     checkName
   )} --json`;
+
+  if (continuation && continuation.action !== 'continue') {
+    return {
+      checkName,
+      runKey: run.runKey,
+      run,
+      skipped: true,
+      skipReason: continuation.instructions.join(' '),
+      command,
+      outputPath: OUTPUT_PATH,
+      generatedJsonCleanedUp: false,
+      continuation,
+    };
+  }
 
   if (!apiKey) {
     const progressReport = await reportAgenticRunProgressSafely(run.runKey, {
@@ -48,6 +62,7 @@ export async function validateAgenticRun(
       command,
       outputPath: OUTPUT_PATH,
       generatedJsonCleanedUp: false,
+      continuation,
       progressReport,
     };
   }
@@ -95,6 +110,7 @@ export async function validateAgenticRun(
       result: check ?? null,
       stdout,
       stderr,
+      continuation,
     };
     response.progressReport = await reportAgenticRunProgressSafely(run.runKey, {
       status: stillMatches ? 'needs_input' : 'verified',
