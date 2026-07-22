@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.1.17](https://github.com/omniboard-dev/mcp/compare/v0.1.16...v0.1.17) (2026-07-22)
+
+
+### Features
+
+* add agentic run resolutions ([f6dde49](https://github.com/omniboard-dev/mcp/commit/f6dde4972ff1280c0b1871cd65e456f815c6a684))
+
+
+### Bug Fixes
+
+* MR description formatting ([719135d](https://github.com/omniboard-dev/mcp/commit/719135def855510f042937252517356fa895ddc5))
+
 ### [0.1.16](https://github.com/omniboard-dev/mcp/compare/v0.1.15...v0.1.16) (2026-07-21)
 
 ### [0.1.15](https://github.com/omniboard-dev/mcp/compare/v0.1.14...v0.1.15) (2026-07-15)
