@@ -207,6 +207,8 @@ export const AGENTIC_RUN_PROGRESS_STATUS_VALUES = [
   'committed',
   'pushed',
   'mr_created',
+  'done',
+  // Backward compatibility for clients and rows created before done + resolution.
   'merged',
   'blocked',
   'failed',
@@ -214,6 +216,11 @@ export const AGENTIC_RUN_PROGRESS_STATUS_VALUES = [
 
 export type AgenticRunProgressStatus =
   (typeof AGENTIC_RUN_PROGRESS_STATUS_VALUES)[number];
+
+export const AGENTIC_RUN_RESOLUTION_VALUES = ['merged', 'dismissed'] as const;
+
+export type AgenticRunResolution =
+  (typeof AGENTIC_RUN_RESOLUTION_VALUES)[number];
 
 export interface AgenticRunProviderPipelineDiagnostic {
   name: string;
@@ -226,6 +233,8 @@ export interface AgenticRunProviderPipelineDiagnostic {
 
 export interface AgenticRunProjectProgress {
   status: AgenticRunProgressStatus;
+  resolution?: AgenticRunResolution | null;
+  resolutionReason?: string | null;
   branch?: string | null;
   commitSha?: string | null;
   mergeRequestUrl?: string | null;
@@ -263,6 +272,8 @@ export type AgenticRunContinuationReason =
   | 'actionable_merge_block'
   | 'actionable_review_feedback'
   | 'application_pipeline_failure'
+  | 'change_completed'
+  | 'change_dismissed'
   | 'change_merged'
   | 'infrastructure_pipeline_failure'
   | 'project_no_longer_matches'
@@ -293,6 +304,8 @@ export interface AgenticRunProgressUpsertInput {
   runKey: string;
   projectName: string;
   status?: AgenticRunProgressStatus;
+  resolution?: AgenticRunResolution | null;
+  resolutionReason?: string | null;
   repositoryUrl?: string | null;
   localPath?: string | null;
   branch?: string | null;

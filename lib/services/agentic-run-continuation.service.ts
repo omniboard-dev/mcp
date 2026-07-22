@@ -34,6 +34,10 @@ export function getAgenticRunContinuationDecision(
     );
   }
 
+  if (projectState.progress.status === 'done') {
+    return doneDecision(projectState, diagnostics);
+  }
+
   if (!projectState.providerSync.success) {
     return decision(
       'wait',
@@ -169,6 +173,36 @@ export function getAgenticRunContinuationDecision(
         diagnostics
       );
   }
+}
+
+function doneDecision(
+  projectState: AgenticRunProjectState,
+  diagnostics: string[]
+): AgenticRunContinuationDecision {
+  if (projectState.progress.resolution === 'dismissed') {
+    return decision(
+      'stop',
+      'change_dismissed',
+      ['The finding was dismissed. No further workspace work is required.'],
+      diagnostics
+    );
+  }
+
+  if (projectState.progress.resolution === 'merged') {
+    return decision(
+      'stop',
+      'change_merged',
+      ['The change request is merged. No further workspace work is required.'],
+      diagnostics
+    );
+  }
+
+  return decision(
+    'stop',
+    'change_completed',
+    ['The run is done. No further workspace work is required.'],
+    diagnostics
+  );
 }
 
 export function hasOnlyInfrastructureFailures(

@@ -6,6 +6,7 @@ import {
   AgenticRunProgressUpsertInput,
   AgenticRunMatchedProjectsResponse,
   AgenticRunProjectState,
+  AgenticRunResolution,
   AgenticRunResponse,
   AgenticRunsResponse,
   RunnerAgenticRunsResponse,
@@ -23,6 +24,8 @@ const pipelineRetryAttempts = new Map<
 
 export interface ReportAgenticRunProgressOptions {
   status?: AgenticRunProgressStatus;
+  resolution?: AgenticRunResolution | null;
+  resolutionReason?: string | null;
   repositoryUrl?: string | null;
   localPath?: string | null;
   branch?: string | null;
@@ -133,6 +136,7 @@ export async function reportAgenticRunProgress(
   runKey: string,
   options: ReportAgenticRunProgressOptions = {}
 ): Promise<AgenticRunProgressReportResult> {
+  assertValidResolution(options);
   const payload = await createAgenticRunProgressPayload(runKey, options);
   const response = await api.upsertAgenticRunProgress(payload);
 
@@ -149,10 +153,13 @@ export async function reportRunnerAgenticRunProgress(
   projectName: string,
   options: ReportAgenticRunProgressOptions = {}
 ): Promise<AgenticRunProgressReportResult> {
+  assertValidResolution(options);
   const payload = withoutUndefined({
     runKey,
     projectName,
     status: options.status,
+    resolution: options.resolution,
+    resolutionReason: options.resolutionReason,
     repositoryUrl: options.repositoryUrl,
     localPath: options.localPath,
     branch: options.branch,
@@ -237,7 +244,8 @@ export function createAgenticRunAgentContext(
       ...(continuation?.instructions ?? []),
       'Use the agentic run prompt, check metadata, and result details as the primary context for the change.',
       'Inspect the local codebase before editing and make the smallest coherent change that resolves the agentic check.',
-      `Report meaningful progress with \`omniboard_local_report_agentic_run_progress\` using runKey "${run.runKey}" when work is implemented, needs input, verified, committed, pushed, MR created, merged, blocked, or failed.`,
+      `Report meaningful progress with \`omniboard_local_report_agentic_run_progress\` using runKey "${run.runKey}" when work is implemented, needs input, verified, committed, pushed, MR created, done with a resolution, blocked, or failed.`,
+      'If investigation concludes that no code change is required—for example, the finding is a false positive, expected usage, generated code, or the checked library\'s own implementation—report status "done", resolution "dismissed", and a concise resolutionReason such as "false_positive"; do not leave the project at "verified".',
       'After changing the code, run the relevant project build, test, or lint command when available.',
       `If \`OMNIBOARD_API_KEY\` is available, optionally run \`omniboard_local_validate_agentic_run\` with runKey "${run.runKey}" to confirm whether the check still matches.`,
       'If `OMNIBOARD_API_KEY` is not available, skip analyzer validation and report that it was skipped.',
@@ -262,6 +270,26 @@ function withAgentContext(response: AgenticRunResponse): AgenticRunResponse {
   };
 }
 
+function assertValidResolution(options: ReportAgenticRunProgressOptions) {
+  if (options.status === 'done' && !options.resolution) {
+    throw new Error(
+      'A done agentic run progress report requires a resolution.'
+    );
+  }
+
+  if (options.resolution && options.status !== 'done') {
+    throw new Error(
+      'An agentic run resolution can only be reported with status "done".'
+    );
+  }
+
+  if (options.resolutionReason && options.resolution !== 'dismissed') {
+    throw new Error(
+      'An agentic run resolution reason requires resolution "dismissed".'
+    );
+  }
+}
+
 async function createAgenticRunProgressPayload(
   runKey: string,
   options: ReportAgenticRunProgressOptions
@@ -272,6 +300,8 @@ async function createAgenticRunProgressPayload(
     runKey,
     projectName: project.name,
     status: options.status,
+    resolution: options.resolution,
+    resolutionReason: options.resolutionReason,
     repositoryUrl: options.repositoryUrl ?? project.repository ?? null,
     localPath: options.localPath ?? process.cwd(),
     branch: options.branch ?? project.branch ?? null,

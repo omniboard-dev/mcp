@@ -91,7 +91,10 @@ decision permits work.
 
 Reports a workflow milestone for one run. Supported milestones include
 `implemented`, `needs_input`, `verified`, `committed`, `pushed`,
-`mr_created`, `merged`, `blocked`, and `failed`.
+`mr_created`, `done`, `blocked`, and `failed`. A `done` progress report
+includes the resolution `merged` or `dismissed`; dismissed findings can include
+a `resolutionReason` such as `false_positive`. The legacy `merged` status
+remains accepted for backward compatibility.
 
 The tool can also report repository, commit, merge request, pipeline,
 verification, error, note, and metadata details.

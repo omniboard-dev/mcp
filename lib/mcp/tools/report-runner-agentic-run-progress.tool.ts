@@ -1,6 +1,9 @@
 import { z } from 'zod';
 
-import { AGENTIC_RUN_PROGRESS_STATUS_VALUES } from '../../interface.js';
+import {
+  AGENTIC_RUN_PROGRESS_STATUS_VALUES,
+  AGENTIC_RUN_RESOLUTION_VALUES,
+} from '../../interface.js';
 import { reportRunnerAgenticRunProgress } from '../../services/agentic-runs.service.js';
 import { McpToolDefinition } from '../shared.js';
 
@@ -12,6 +15,8 @@ export const reportRunnerAgenticRunProgressTool: McpToolDefinition = {
     runKey: z.string().min(1),
     projectName: z.string().min(1),
     status: z.enum(AGENTIC_RUN_PROGRESS_STATUS_VALUES),
+    resolution: z.enum(AGENTIC_RUN_RESOLUTION_VALUES).nullable().optional(),
+    resolutionReason: z.string().min(1).nullable().optional(),
     repositoryUrl: z.string().min(1).optional(),
     localPath: z.string().min(1).optional(),
     branch: z.string().min(1).optional(),

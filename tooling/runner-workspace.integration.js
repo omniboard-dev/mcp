@@ -453,6 +453,7 @@ try {
       'chore: complete agentic run run-fallback'
     );
     const {
+      createAgenticRunAgentContext,
       getAgenticRun,
       reportAgenticRunProgress,
       reportRunnerAgenticRunProgress,
@@ -464,7 +465,21 @@ try {
       '../dist/services/agentic-run-continuation.service.js'
     );
 
-    const continuationDecision = (status, mergeRequestDetailedStatus = null) =>
+    const activeAgentContext = createAgenticRunAgentContext(baseRun);
+    assert(
+      activeAgentContext.instructions.some(
+        (instruction) =>
+          instruction.includes('false positive') &&
+          instruction.includes('resolution "dismissed"')
+      )
+    );
+
+    const continuationDecision = (
+      status,
+      mergeRequestDetailedStatus = null,
+      resolution = null,
+      providerSyncSuccess = true
+    ) =>
       getAgenticRunContinuationDecision({
         run: {
           runKey: 'run-uxf',
@@ -477,8 +492,12 @@ try {
           name: 'project-a',
           currentlyMatchesCheck: true,
         },
-        progress: { status, mergeRequestDetailedStatus },
-        providerSync: { attempted: false, success: true, diagnostics: [] },
+        progress: { status, mergeRequestDetailedStatus, resolution },
+        providerSync: {
+          attempted: false,
+          success: providerSyncSuccess,
+          diagnostics: [],
+        },
       });
     for (const status of [
       'pending',
@@ -512,6 +531,22 @@ try {
         'waiting_for_provider_activity'
       );
     }
+    assert.deepEqual(
+      [
+        continuationDecision('done', null, 'merged'),
+        continuationDecision('done', null, 'dismissed'),
+        continuationDecision('done'),
+        continuationDecision('done', null, 'dismissed', false),
+        continuationDecision('merged'),
+      ].map(({ action, reason }) => [action, reason]),
+      [
+        ['stop', 'change_merged'],
+        ['stop', 'change_dismissed'],
+        ['stop', 'change_completed'],
+        ['stop', 'change_dismissed'],
+        ['stop', 'change_merged'],
+      ]
+    );
     const {
       createChangeRequest,
       resolveGitUsername,
@@ -619,7 +654,9 @@ try {
     );
 
     await reportRunnerAgenticRunProgress('run-uxf', 'project-a', {
-      status: 'in_progress',
+      status: 'done',
+      resolution: 'dismissed',
+      resolutionReason: 'false_positive',
       localPath: '/runner/project-a',
       metadata: { executionMode: 'caller-controlled' },
     });
@@ -629,8 +666,25 @@ try {
       'dedicated-runner'
     );
     assert.equal(callerControlledProgress.localPath, '/runner/project-a');
+    assert.equal(callerControlledProgress.status, 'done');
+    assert.equal(callerControlledProgress.resolution, 'dismissed');
+    assert.equal(callerControlledProgress.resolutionReason, 'false_positive');
     assert.equal('pipelineStatus' in callerControlledProgress, false);
     assert.equal('mergeRequestUrl' in callerControlledProgress, false);
+
+    await assert.rejects(
+      reportRunnerAgenticRunProgress('run-uxf', 'project-a', {
+        status: 'done',
+      }),
+      /done agentic run progress report requires a resolution/
+    );
+    await assert.rejects(
+      reportRunnerAgenticRunProgress('run-uxf', 'project-a', {
+        status: 'in_progress',
+        resolution: 'dismissed',
+      }),
+      /resolution can only be reported with status "done"/
+    );
 
     await reportAgenticRunProgress('run-uxf', { status: 'in_progress' });
     assert.equal(progress.at(-1).localPath, root);

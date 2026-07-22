@@ -34,6 +34,8 @@ try {
   );
   const progressProperties = runnerProgressTool.inputSchema.properties;
   for (const property of [
+    'resolution',
+    'resolutionReason',
     'mergeRequestState',
     'mergeRequestDetailedStatus',
     'pipelineStatus',
