@@ -13,7 +13,13 @@ export const finalizeAgenticRunWorkspaceTool: McpToolDefinition = {
     localPath: z.string().min(1),
     commitMessage: z.string().min(1).optional(),
     mergeRequestTitle: z.string().min(1).optional(),
-    mergeRequestDescription: z.string().min(1).optional(),
+    mergeRequestDescription: z
+      .string()
+      .min(1)
+      .describe(
+        'Markdown change-request description. Use real line breaks rather than literal \\n sequences.'
+      )
+      .optional(),
     authorName: z.string().min(1).optional(),
     authorEmail: z.string().email().optional(),
   },

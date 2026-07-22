@@ -39,6 +39,8 @@ export async function createChangeRequest(
   title: string,
   description?: string
 ): Promise<SourceControlChangeRequest> {
+  const normalizedDescription = normalizeChangeRequestDescription(description);
+
   switch (access.provider) {
     case 'bitbucket_data_center':
       return createBitbucketPullRequest(
@@ -47,7 +49,7 @@ export async function createChangeRequest(
         sourceBranch,
         targetBranch,
         title,
-        description
+        normalizedDescription
       );
     case 'gitlab':
       return createGitlabMergeRequest(
@@ -56,9 +58,18 @@ export async function createChangeRequest(
         sourceBranch,
         targetBranch,
         title,
-        description
+        normalizedDescription
       );
   }
+}
+
+function normalizeChangeRequestDescription(description?: string) {
+  if (!description || /[\r\n]/.test(description)) return description;
+
+  const escapedLineBreaks = description.match(/\\r\\n|\\n/g) ?? [];
+  if (escapedLineBreaks.length < 2) return description;
+
+  return description.replace(/\\r\\n|\\n/g, '\n');
 }
 
 export async function retryFailedPipeline(

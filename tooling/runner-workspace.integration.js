@@ -567,7 +567,7 @@ try {
       'agentic/run-uxf',
       'main',
       'Fix UXF icon registry',
-      'Automated test change.'
+      '## Summary\\n- Automated test change.\\n\\n## Verification\\n- Passed.'
     );
     assert.equal(bitbucketPullRequest.id, 17);
     assert.equal(
@@ -594,13 +594,17 @@ try {
         project: { key: 'OB' },
       },
     });
+    assert.equal(
+      bitbucketPullRequestPayload.description,
+      '## Summary\n- Automated test change.\n\n## Verification\n- Passed.'
+    );
     const retriedBitbucketPullRequest = await createChangeRequest(
       bitbucketAccess,
       bitbucketRepository.repositoryId,
       'agentic/run-uxf',
       'main',
       'Fix UXF icon registry',
-      'Automated test change.'
+      'Use `\\n` when documenting escaped line breaks.'
     );
     assert.equal(retriedBitbucketPullRequest.id, 17);
     assert.equal(
@@ -609,6 +613,10 @@ try {
     );
     assert.equal(bitbucketPullRequestCreateCount, 2);
     assert.equal(bitbucketPullRequestLookupCount, 2);
+    assert.equal(
+      bitbucketPullRequestPayload.description,
+      'Use `\\n` when documenting escaped line breaks.'
+    );
 
     await reportRunnerAgenticRunProgress('run-uxf', 'project-a', {
       status: 'in_progress',
@@ -982,6 +990,8 @@ cat
       projectName: 'project-a',
       localPath: prepared.workspace.localPath,
       mergeRequestTitle: 'Fix UXF icon registry',
+      mergeRequestDescription:
+        '## Summary\\n- Update the icon registry.\\n\\n## Verification\\n- Tests passed.',
     });
 
     assert.match(finalized.commitSha, /^[a-f0-9]{40}$/);
@@ -989,11 +999,17 @@ cat
       finalized.mergeRequest.url,
       'https://gitlab.example.com/group/project/-/merge_requests/3'
     );
+    assert.equal(
+      mergeRequestPayload.description,
+      '## Summary\n- Update the icon registry.\n\n## Verification\n- Tests passed.'
+    );
     const retried = await finalizeRunnerWorkspace({
       runKey: 'run-uxf',
       projectName: 'project-a',
       localPath: prepared.workspace.localPath,
       mergeRequestTitle: 'Fix UXF icon registry',
+      mergeRequestDescription:
+        '## Summary\n- Update the icon registry.\n\n## Verification\n- Tests passed.',
     });
     assert.equal(retried.commitSha, finalized.commitSha);
 
