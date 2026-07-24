@@ -317,6 +317,7 @@ export interface AgenticRunProgressUpsertInput {
   pipelineUrl?: string | null;
   pipelineFailureSummary?: string | null;
   error?: string | null;
+  /** Markdown-formatted progress notes. Plain text remains valid Markdown. */
   notes?: string | null;
   verification?: Record<string, unknown> | null;
   metadata?: Record<string, unknown> | null;

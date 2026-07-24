@@ -28,7 +28,14 @@ export const reportRunnerAgenticRunProgressTool: McpToolDefinition = {
     pipelineUrl: z.string().min(1).optional(),
     pipelineFailureSummary: z.string().min(1).optional(),
     error: z.string().min(1).nullable().optional(),
-    notes: z.string().min(1).nullable().optional(),
+    notes: z
+      .string()
+      .min(1)
+      .nullable()
+      .optional()
+      .describe(
+        'Optional Markdown-formatted progress notes. Plain text is valid Markdown.'
+      ),
     verification: z.record(z.unknown()).nullable().optional(),
     metadata: z.record(z.unknown()).nullable().optional(),
   },

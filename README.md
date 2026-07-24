@@ -97,7 +97,8 @@ a `resolutionReason` such as `false_positive`. The legacy `merged` status
 remains accepted for backward compatibility.
 
 The tool can also report repository, commit, merge request, pipeline,
-verification, error, note, and metadata details.
+verification, error, note, and metadata details. The optional `notes` field accepts
+Markdown; plain text remains valid Markdown.
 
 #### `omniboard_local_validate_agentic_run`
 
@@ -240,4 +241,4 @@ Reports a dedicated-runner milestone for an explicit `runKey` and
 `projectName` without resolving the MCP process working directory as an
 Omniboard project. It supports the same repository, commit, merge request,
 pipeline, verification, error, note, and metadata details as developer-local
-progress reporting.
+progress reporting, including Markdown in the optional `notes` field.
