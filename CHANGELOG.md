@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.1.18](https://github.com/omniboard-dev/mcp/compare/v0.1.17...v0.1.18) (2026-07-24)
+
+
+### Features
+
+* document markdown support ([02585fd](https://github.com/omniboard-dev/mcp/commit/02585fd7475435061210bfe58feb29723631c4ed))
+
 ### [0.1.17](https://github.com/omniboard-dev/mcp/compare/v0.1.16...v0.1.17) (2026-07-22)
 
 
