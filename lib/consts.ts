@@ -8,3 +8,4 @@ export const MCP_RUN_PROJECT_STATE_REFRESH_ENDPOINT =
   'mcp/run-project-state/refresh';
 export const MCP_REPOSITORY_ACCESS_ENDPOINT = 'mcp/repository-access';
 export const AGENTIC_CHECK_RUN_PROGRESS_ENDPOINT = 'agentic-check-run-progress';
+export const MCP_RUN_EXECUTIONS_ENDPOINT = 'mcp/run-executions';

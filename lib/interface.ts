@@ -376,7 +376,57 @@ export type McpRepositoryAccess =
   | GitlabRepositoryAccess
   | BitbucketDataCenterRepositoryAccess;
 
+export const RUNNER_EXECUTION_PHASE_VALUES = [
+  'preparing',
+  'prepared',
+  'working',
+  'committed',
+  'pushed',
+  'recovery_conflicts',
+  'recovery_ready_to_push',
+  'completed',
+  'abandoned',
+] as const;
+
+export type RunnerExecutionPhase =
+  (typeof RUNNER_EXECUTION_PHASE_VALUES)[number];
+
+export interface RunnerExecution {
+  executionKey: string;
+  runKey: string;
+  checkName: string;
+  projectName: string;
+  repositoryUrl: string;
+  sourceControlProvider: McpRepositoryAccess['provider'];
+  sourceControlRepositoryId: string;
+  branch: string;
+  targetBranch: string | null;
+  commitMessage: string | null;
+  preparedHeadSha: string | null;
+  commitSha: string | null;
+  phase: RunnerExecutionPhase;
+  recovery: RunnerWorkspaceRebaseRecovery | null;
+  generation: number;
+  leaseOwner: string | null;
+  leaseExpiresAt: string | null;
+  heartbeatAt: string | null;
+  completedAt: string | null;
+  cleanupAfter: string | null;
+  stateVersion: number;
+  creationDate: string | null;
+  updateDate: string | null;
+}
+
+export interface RunnerExecutionLeaseResponse {
+  execution: RunnerExecution;
+  leaseToken: string;
+}
+
 export interface RunnerWorkspaceState {
+  executionKey: string;
+  generation: number;
+  stateVersion: number;
+  phase: RunnerExecutionPhase;
   runKey: string;
   checkName: string;
   projectName: string;

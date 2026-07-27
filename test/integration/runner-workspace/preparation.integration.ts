@@ -160,32 +160,37 @@ export async function runWorkspacePreparationIntegration(context: any) {
     }),
     /no verified runner commit to resume/
   );
-  await assert.rejects(
-    prepareRunnerWorkspace({
-      runKey: 'run-uxf',
-      projectName: 'project-a',
-      branch: 'agentic/retry-guard',
-    }),
-    /retained workspace contains an unverified local commit/
-  );
-  await fs.rm(retryPrepared.workspace.localPath, {
-    recursive: true,
-    force: true,
+  const retryRecreated = await prepareRunnerWorkspace({
+    runKey: 'run-uxf',
+    projectName: 'project-a',
+    branch: 'agentic/retry-guard',
   });
-  await fs.rm(
-    path.join(
-      runnerRoot,
-      'state',
-      `${path.basename(retryPrepared.workspace.localPath)}.json`
-    ),
-    { force: true }
+  assert.notEqual(
+    retryRecreated.workspace.localPath,
+    retryPrepared.workspace.localPath
   );
+  assert.equal(
+    retryRecreated.workspace.generation,
+    retryPrepared.workspace.generation + 1
+  );
+  assert.equal(retryRecreated.workspace.phase, 'prepared');
+  await Promise.all(
+    [retryPrepared.workspace.localPath, retryRecreated.workspace.localPath].map(
+      (workspacePath) =>
+        fs.rm(workspacePath, {
+          recursive: true,
+          force: true,
+        })
+    )
+  );
+  state.runnerExecution = null;
+  state.runnerLeaseToken = null;
   state.projectProgressBranch = 'agentic/run-uxf';
   progress.length = 0;
 
   await fs.writeFile(path.join(runnerRoot, '.gitignore'), 'custom/\n');
 
-  const prepared = await prepareRunnerWorkspace({
+  let prepared = await prepareRunnerWorkspace({
     runKey: 'run-uxf',
     projectName: 'project-a',
     repositoryUrl: pathToFileUrl(remotePath).replace(/\.git$/, ''),
@@ -205,6 +210,17 @@ export async function runWorkspacePreparationIntegration(context: any) {
     projectName: 'project-a',
   });
   assert.equal(preparedAgain.workspace.localPath, prepared.workspace.localPath);
+  const originalWorkspacePath = prepared.workspace.localPath;
+  const originalGeneration = prepared.workspace.generation;
+  await fs.rm(originalWorkspacePath, { recursive: true, force: true });
+  const recreated = await prepareRunnerWorkspace({
+    runKey: 'run-uxf',
+    projectName: 'project-a',
+  });
+  assert.notEqual(recreated.workspace.localPath, originalWorkspacePath);
+  assert.equal(recreated.workspace.generation, originalGeneration + 1);
+  assert.equal(recreated.workspace.phase, 'prepared');
+  prepared = recreated;
   const progressCountBeforeBranchMismatch = progress.length;
   await assert.rejects(
     prepareRunnerWorkspace({
@@ -212,7 +228,7 @@ export async function runWorkspacePreparationIntegration(context: any) {
       projectName: 'project-a',
       branch: 'agentic/other-branch',
     }),
-    /Retained runner workspace branch.*does not match resolved branch/
+    /Existing runner execution identity does not match the request/
   );
   progress.length = progressCountBeforeBranchMismatch;
   assert.equal(
@@ -221,33 +237,16 @@ export async function runWorkspacePreparationIntegration(context: any) {
   );
   assert.equal(
     await fs.readFile(path.join(runnerRoot, '.gitignore'), 'utf8'),
-    'custom/\nworkspaces/\nstate/\n'
+    'custom/\nworkspaces/\n'
   );
   await assert.rejects(
     fs.access(
       path.join(prepared.workspace.localPath, '.git', 'omniboard-runner.json')
     )
   );
-  const stateFileName = `${path.basename(prepared.workspace.localPath)}.json`;
-  await fs.access(path.join(runnerRoot, 'state', stateFileName));
-  assert.deepEqual(await fs.readdir(path.join(runnerRoot, 'state')), [
-    stateFileName,
-  ]);
-  const stateFilePath = path.join(runnerRoot, 'state', stateFileName);
-  const originalStateContent = await fs.readFile(stateFilePath, 'utf8');
-  assert.doesNotMatch(originalStateContent, /test-token/);
-  const tamperedState = JSON.parse(originalStateContent);
-  tamperedState.state.targetBranch = 'tampered-target';
-  await fs.writeFile(stateFilePath, JSON.stringify(tamperedState, null, 2));
-  await assert.rejects(
-    finalizeRunnerWorkspace({
-      runKey: 'run-uxf',
-      projectName: 'project-a',
-      localPath: prepared.workspace.localPath,
-    }),
-    /metadata integrity validation failed/
-  );
-  await fs.writeFile(stateFilePath, originalStateContent);
+  await assert.rejects(fs.access(path.join(runnerRoot, 'state')));
+  assert.doesNotMatch(JSON.stringify(state.runnerExecution), /test-token/);
+  assert.equal('leaseToken' in state.runnerExecution, false);
 
   const externalWorktree = path.join(root, 'external-worktree');
   await fs.mkdir(externalWorktree);
@@ -342,7 +341,7 @@ export async function runWorkspacePreparationIntegration(context: any) {
       localPath: prepared.workspace.localPath,
       mergeRequestTitle: 'Fix UXF icon registry',
     }),
-    /provider branch.*does not match runner workspace branch/i
+    /execution identity does not match/i
   );
   state.projectProgressBranch = 'agentic/run-uxf';
 
@@ -370,10 +369,10 @@ export async function runWorkspacePreparationIntegration(context: any) {
       localPath: prepared.workspace.localPath,
       mergeRequestTitle: 'Fix UXF icon registry',
     }),
-    /GitLab project identity changed/
+    /execution identity does not match/i
   );
   state.expectedProjectPath = 'group/project';
   progress.splice(progressBeforeIdentityCheck);
 
-  return { prepared, stateFileName };
+  return { prepared };
 }

@@ -1,3 +1,5 @@
+import path from 'node:path';
+
 import {
   AgenticRunProgressReportResult,
   AgenticRunProjectState,
@@ -15,6 +17,13 @@ import {
   pushBranch,
 } from './git.service.js';
 import {
+  acquireRunnerExecution,
+  completeRunnerExecutionByIdentity,
+  createRunnerWorkspaceState,
+  releaseRunnerExecution,
+  writeRunnerState,
+} from './runner-execution.service.js';
+import {
   assertCurrentRunnerBranch,
   createRunnerCommit,
   resolveExistingRunnerCommit,
@@ -23,12 +32,15 @@ import { finalizeRunnerRebaseRecovery } from './runner-workspace-recovery.servic
 import {
   assertAuthorizedRepositoryUrl,
   repositoryIdentity,
+  resolveProjectRepositoryUrl,
   withGitCredentials,
 } from './runner-workspace-repository.service.js';
 import {
   assertGitWorkspaceIdentity,
+  assertRunnerWorkspacePath,
   assertWorkspaceIdentity,
-  readRunnerState,
+  ensureRunnerLayout,
+  runnerWorkspacePath,
 } from './runner-workspace-store.service.js';
 import {
   createChangeRequest,
@@ -38,6 +50,7 @@ import {
 import {
   defaultRunnerCommitMessage,
   normalizeNonEmptyString,
+  resolveRunnerGitValues,
 } from './runner-workspace-values.service.js';
 
 const DEFAULT_AUTHOR_NAME = 'Omniboard Agent';
@@ -64,21 +77,75 @@ export async function finalizeRunnerWorkspace({
   authorName = DEFAULT_AUTHOR_NAME,
   authorEmail = DEFAULT_AUTHOR_EMAIL,
 }: FinalizeRunnerWorkspaceOptions): Promise<RunnerWorkspaceFinalizeResult> {
-  const { state, localPath } = await readRunnerState(requestedLocalPath);
-  assertWorkspaceIdentity(state, runKey, projectName, localPath);
   const projectState = await api.refreshAgenticRunProjectState(
     runKey,
     projectName
   );
   const continuation = await resolveAgenticRunContinuation(projectState);
   if (continuation.action !== 'continue') {
+    if (continuation.action === 'stop') {
+      await completeRunnerExecutionByIdentity(
+        runKey,
+        projectName,
+        continuation.reason === 'change_dismissed' ? 'abandoned' : 'completed'
+      );
+    }
     throw new Error(
       `Runner workspace finalization is not permitted while the continuation decision is "${
         continuation.action
       }" (${continuation.reason}). ${continuation.instructions.join(' ')}`
     );
   }
-  assertFinalizationProjectStateMatchesWorkspace(state, projectState);
+
+  const repositoryUrl = resolveProjectRepositoryUrl(projectState.project);
+  const access = await api.getRepositoryAccess(repositoryUrl);
+  const effectiveRepositoryUrl = await getEffectiveRepositoryUrl(
+    repositoryUrl,
+    process.cwd()
+  );
+  assertAuthorizedRepositoryUrl(access, repositoryUrl, effectiveRepositoryUrl);
+  const repository = await validateRepositoryAccess(
+    access,
+    effectiveRepositoryUrl
+  );
+  const resolvedGitValues = resolveRunnerGitValues(projectState.run, {
+    branch: projectState.progress.branch ?? undefined,
+  });
+  const execution = await acquireRunnerExecution({
+    runKey,
+    projectName,
+    repositoryUrl,
+    sourceControlProvider: access.provider,
+    sourceControlRepositoryId: repository.repositoryId,
+    branch: resolvedGitValues.branchName,
+    commitMessage: resolvedGitValues.commitMessage,
+  });
+  let localPath: string;
+  let state: RunnerWorkspaceState;
+  try {
+    const layout = await ensureRunnerLayout();
+    const expectedLocalPath = runnerWorkspacePath(
+      layout.workspaces,
+      projectName,
+      execution.executionKey,
+      execution.generation
+    );
+    if (path.resolve(requestedLocalPath) !== path.resolve(expectedLocalPath)) {
+      throw new Error(
+        'Runner workspace path does not match the active DB execution generation.'
+      );
+    }
+    localPath = await assertRunnerWorkspacePath(
+      layout.workspaces,
+      expectedLocalPath
+    );
+    state = createRunnerWorkspaceState(execution, localPath, access);
+    assertWorkspaceIdentity(state, runKey, projectName, localPath);
+    assertFinalizationProjectStateMatchesWorkspace(state, projectState);
+  } catch (error) {
+    await releaseRunnerExecution(execution.executionKey);
+    throw error;
+  }
 
   const resolvedCommitMessage =
     normalizeNonEmptyString(commitMessage) ??
@@ -119,32 +186,32 @@ export async function finalizeRunnerWorkspace({
       })
     );
 
-    const access = await api.getRepositoryAccess(state.repositoryUrl);
-    const effectiveRepositoryUrl = await getEffectiveRepositoryUrl(
+    const workspaceRepositoryUrl = await getEffectiveRepositoryUrl(
       state.repositoryUrl,
       localPath
     );
     assertAuthorizedRepositoryUrl(
       access,
       state.repositoryUrl,
-      effectiveRepositoryUrl
+      workspaceRepositoryUrl
     );
-    const repository = await validateRepositoryAccess(
+    const workspaceRepository = await validateRepositoryAccess(
       access,
-      effectiveRepositoryUrl
+      workspaceRepositoryUrl
     );
-    if (repository.repositoryId !== state.projectPath) {
+    if (workspaceRepository.repositoryId !== state.projectPath) {
       throw new Error(
         `${providerLabel(access)} ${
           access.provider === 'gitlab' ? 'project' : 'repository'
         } identity changed from "${state.projectPath}" to "${
-          repository.repositoryId
+          workspaceRepository.repositoryId
         }".`
       );
     }
     await withGitCredentials(access, localPath, (env) =>
-      pushBranch(effectiveRepositoryUrl, state.branch, localPath, env)
+      pushBranch(workspaceRepositoryUrl, state.branch, localPath, env)
     );
+    await writeRunnerState(state, 'pushed');
     progressReports.push(
       await reportRunnerAgenticRunProgressSafely(runKey, projectName, {
         status: 'pushed',
@@ -183,6 +250,7 @@ export async function finalizeRunnerWorkspace({
       })
     );
 
+    await releaseRunnerExecution(state.executionKey);
     return {
       completed: true,
       workspace: state,

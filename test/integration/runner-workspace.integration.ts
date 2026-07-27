@@ -47,6 +47,7 @@ const state: Record<string, any> = {
   matchedProjectsLookupCount: 0,
   canPush: true,
   projectProgressStatus: 'pending',
+  projectProgressResolution: null,
   projectProgressBranch: 'agentic/run-uxf',
   projectPipelineStatus: null,
   projectPipelineUrl: null,
@@ -56,6 +57,10 @@ const state: Record<string, any> = {
   projectMergeRequestDetailedStatus: null,
   projectMatchesCheck: true,
   providerSyncSuccess: true,
+  runnerExecution: null,
+  runnerLeaseToken: null,
+  recoveryCheckpointFailures: 0,
+  runnerCompletionByIdentityPhases: [],
 };
 
 try {
@@ -92,6 +97,153 @@ try {
     const body = await readJsonBody(request);
     response.setHeader('Content-Type', 'application/json');
 
+    if (
+      request.method === 'POST' &&
+      url.pathname === '/mcp/run-executions/acquire'
+    ) {
+      let execution = state.runnerExecution;
+      if (!execution) {
+        execution = createRunnerExecution(body);
+        state.runnerExecution = execution;
+      } else if (
+        execution.phase === 'preparing' &&
+        !execution.preparedHeadSha
+      ) {
+        Object.assign(execution, {
+          repositoryUrl: body.repositoryUrl,
+          sourceControlProvider: body.sourceControlProvider,
+          sourceControlRepositoryId: body.sourceControlRepositoryId,
+          branch: body.branch,
+          commitMessage: body.commitMessage ?? null,
+        });
+      } else if (
+        execution.sourceControlProvider !== body.sourceControlProvider ||
+        execution.sourceControlRepositoryId !==
+          body.sourceControlRepositoryId ||
+        execution.branch !== body.branch
+      ) {
+        response.statusCode = 409;
+        return send(response, {
+          message:
+            'Existing runner execution identity does not match the request',
+        });
+      }
+      if (
+        state.runnerLeaseToken &&
+        body.leaseToken !== state.runnerLeaseToken
+      ) {
+        response.statusCode = 409;
+        return send(response, {
+          message: 'Runner execution is leased by another MCP process',
+        });
+      }
+      state.runnerLeaseToken = body.leaseToken ?? 'a'.repeat(64);
+      execution.leaseOwner = body.leaseOwner;
+      execution.leaseExpiresAt = new Date(Date.now() + 300_000).toISOString();
+      execution.heartbeatAt = new Date().toISOString();
+      return send(response, {
+        execution,
+        leaseToken: state.runnerLeaseToken,
+      });
+    }
+
+    const runnerExecutionMatch =
+      /^\/mcp\/run-executions\/([^/]+)\/(renew|checkpoint|reinitialize|complete|release)$/.exec(
+        url.pathname
+      );
+    if (runnerExecutionMatch && state.runnerExecution) {
+      const [, executionKey, operation] = runnerExecutionMatch;
+      const execution = state.runnerExecution;
+      if (executionKey !== execution.executionKey) {
+        response.statusCode = 404;
+        return send(response, { message: 'Runner execution not found' });
+      }
+      if (body.leaseToken !== state.runnerLeaseToken) {
+        response.statusCode = 409;
+        return send(response, { message: 'Runner execution lease is invalid' });
+      }
+      if (
+        operation !== 'renew' &&
+        operation !== 'release' &&
+        body.expectedStateVersion !== execution.stateVersion
+      ) {
+        response.statusCode = 409;
+        return send(response, {
+          message: 'Runner execution state version changed',
+        });
+      }
+      if (operation === 'renew') {
+        execution.heartbeatAt = new Date().toISOString();
+        execution.leaseExpiresAt = new Date(Date.now() + 300_000).toISOString();
+        return send(response, {
+          execution,
+          leaseToken: state.runnerLeaseToken,
+        });
+      }
+      if (operation === 'checkpoint') {
+        if (body.recovery && state.recoveryCheckpointFailures > 0) {
+          state.recoveryCheckpointFailures -= 1;
+          response.statusCode = 503;
+          return send(response, {
+            message: 'Forced recovery checkpoint failure',
+          });
+        }
+        for (const key of [
+          'phase',
+          'targetBranch',
+          'commitMessage',
+          'preparedHeadSha',
+          'commitSha',
+          'recovery',
+        ]) {
+          if (Object.prototype.hasOwnProperty.call(body, key)) {
+            execution[key] = body[key];
+          }
+        }
+        execution.stateVersion += 1;
+        return send(response, execution);
+      }
+      if (operation === 'reinitialize') {
+        Object.assign(execution, {
+          generation: execution.generation + 1,
+          phase: 'preparing',
+          targetBranch: null,
+          preparedHeadSha: null,
+          commitSha: null,
+          recovery: null,
+          stateVersion: execution.stateVersion + 1,
+        });
+        return send(response, execution);
+      }
+      if (operation === 'complete') {
+        execution.phase = body.phase;
+        execution.stateVersion += 1;
+      }
+      state.runnerLeaseToken = null;
+      execution.leaseOwner = null;
+      execution.leaseExpiresAt = null;
+      execution.heartbeatAt = null;
+      return send(response, execution);
+    }
+
+    if (
+      request.method === 'POST' &&
+      url.pathname === '/mcp/run-executions/complete-by-identity'
+    ) {
+      const execution = state.runnerExecution;
+      state.runnerCompletionByIdentityPhases.push(body.phase);
+      if (!execution) {
+        return send(response, { completed: false, execution: null });
+      }
+      execution.phase = body.phase;
+      execution.stateVersion += 1;
+      state.runnerLeaseToken = null;
+      execution.leaseOwner = null;
+      execution.leaseExpiresAt = null;
+      execution.heartbeatAt = null;
+      return send(response, { completed: true, execution });
+    }
+
     if (request.method === 'GET' && url.pathname === '/settings/cli') {
       return send(response, {});
     }
@@ -121,6 +273,7 @@ try {
         },
         progress: {
           status: state.projectProgressStatus,
+          resolution: state.projectProgressResolution,
           branch: state.projectProgressBranch,
           mergeRequestUrl: state.projectMergeRequestUrl,
           mergeRequestState: state.projectMergeRequestState,
@@ -456,7 +609,7 @@ try {
       resolveRunnerGitValues,
     } = await import('../../dist/services/runner-workspace.service.js');
     const { writeRunnerState } = await import(
-      '../../dist/services/runner-workspace-store.service.js'
+      '../../dist/services/runner-execution.service.js'
     );
 
     const context = {
@@ -496,6 +649,35 @@ try {
 } finally {
   process.chdir(originalCwd);
   await fs.rm(root, { recursive: true, force: true });
+}
+
+function createRunnerExecution(input: any) {
+  const now = new Date().toISOString();
+  return {
+    executionKey: '11111111-2222-4333-8444-555555555555',
+    runKey: input.runKey,
+    checkName: 'uxf-icon-registry',
+    projectName: input.projectName,
+    repositoryUrl: input.repositoryUrl,
+    sourceControlProvider: input.sourceControlProvider,
+    sourceControlRepositoryId: input.sourceControlRepositoryId,
+    branch: input.branch,
+    targetBranch: null,
+    commitMessage: input.commitMessage ?? null,
+    preparedHeadSha: null,
+    commitSha: null,
+    phase: 'preparing',
+    recovery: null,
+    generation: 1,
+    leaseOwner: null,
+    leaseExpiresAt: null,
+    heartbeatAt: null,
+    completedAt: null,
+    cleanupAfter: null,
+    stateVersion: 1,
+    creationDate: now,
+    updateDate: now,
+  };
 }
 
 async function commitForTest(targetDir: string, message: string) {

@@ -25,7 +25,6 @@ export async function runWorkspaceRecoveryIntegration(context: any) {
     resolveRunnerGitValues,
     writeRunnerState,
     prepared,
-    stateFileName,
   } = context;
 
   const finalized = await finalizeRunnerWorkspace({
@@ -129,10 +128,30 @@ export async function runWorkspaceRecoveryIntegration(context: any) {
   state.projectProgressStatus = 'blocked';
   state.projectMergeRequestDetailedStatus = 'conflict';
   state.mergeRequestDetailedStatus = null;
+  const generationBeforeFailedRecovery = prepared.workspace.generation;
+  const pathBeforeFailedRecovery = prepared.workspace.localPath;
+  state.recoveryCheckpointFailures = 1;
+  await assert.rejects(
+    prepareRunnerWorkspace({
+      runKey: 'run-uxf',
+      projectName: 'project-a',
+    }),
+    /Forced recovery checkpoint failure/
+  );
+  assert.equal(state.runnerExecution.recovery, null);
   const conflictPreparation = await prepareRunnerWorkspace({
     runKey: 'run-uxf',
     projectName: 'project-a',
   });
+  assert.notEqual(
+    conflictPreparation.workspace.localPath,
+    pathBeforeFailedRecovery
+  );
+  assert.equal(
+    conflictPreparation.workspace.generation,
+    generationBeforeFailedRecovery + 1
+  );
+  prepared.workspace = conflictPreparation.workspace;
   assert.equal(
     conflictPreparation.continuation.reason,
     'actionable_merge_block'
@@ -251,7 +270,11 @@ export async function runWorkspaceRecoveryIntegration(context: any) {
     { cwd: seedPath }
   );
 
-  const exhaustedRecoveryState = conflictFinalized.workspace;
+  const exhaustedPreparation = await prepareRunnerWorkspace({
+    runKey: 'run-uxf',
+    projectName: 'project-a',
+  });
+  const exhaustedRecoveryState = exhaustedPreparation.workspace;
   exhaustedRecoveryState.recovery = {
     kind: 'rebase',
     phase: 'ready_to_push',

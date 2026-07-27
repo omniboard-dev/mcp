@@ -24,7 +24,6 @@ export async function runPostMergeRequestContinuationIntegration(context: any) {
     finalizeRunnerWorkspace,
     resolveRunnerGitValues,
     prepared,
-    stateFileName,
   } = context;
 
   const { getAgenticRun } = await import(
@@ -142,6 +141,35 @@ export async function runPostMergeRequestContinuationIntegration(context: any) {
   state.projectMergeRequestState = 'merged';
   const matchedLookupsBeforeMergedStop = state.matchedProjectsLookupCount;
   const runLookupsBeforeMergedStop = state.agenticRunLookupCount;
+  const mergeRequestCreateCountBeforeStoppedFinalize =
+    state.mergeRequestCreateCount;
+  const progressCountBeforeStoppedFinalize = progress.length;
+  const stateVersionBeforeStoppedFinalize = state.runnerExecution.stateVersion;
+  await assert.rejects(
+    finalizeRunnerWorkspace({
+      runKey: 'run-uxf',
+      projectName: 'project-a',
+      localPath: prepared.workspace.localPath,
+      mergeRequestTitle: 'Fix UXF icon registry',
+    }),
+    /finalization is not permitted.*"stop".*change_merged/
+  );
+  assert.equal(state.runnerExecution.phase, 'completed');
+  assert.equal(
+    state.runnerExecution.stateVersion,
+    stateVersionBeforeStoppedFinalize + 1
+  );
+  assert.equal(state.runnerLeaseToken, null);
+  assert.equal(state.runnerExecution.leaseOwner, null);
+  assert.equal(state.runnerExecution.leaseExpiresAt, null);
+  assert.equal(state.runnerExecution.heartbeatAt, null);
+  assert.equal(state.runnerCompletionByIdentityPhases.at(-1), 'completed');
+  assert.equal(
+    state.mergeRequestCreateCount,
+    mergeRequestCreateCountBeforeStoppedFinalize
+  );
+  assert.equal(progress.length, progressCountBeforeStoppedFinalize);
+
   const mergedPreparation = await prepareRunnerWorkspace({
     runKey: 'run-uxf',
     projectName: 'project-a',
@@ -155,23 +183,20 @@ export async function runPostMergeRequestContinuationIntegration(context: any) {
   );
   assert.equal(state.agenticRunLookupCount, runLookupsBeforeMergedStop);
 
-  const mergeRequestCreateCountBeforeStoppedFinalize =
-    state.mergeRequestCreateCount;
-  const progressCountBeforeStoppedFinalize = progress.length;
+  state.projectProgressStatus = 'done';
+  state.projectProgressResolution = 'dismissed';
   await assert.rejects(
     finalizeRunnerWorkspace({
       runKey: 'run-uxf',
       projectName: 'project-a',
       localPath: prepared.workspace.localPath,
-      mergeRequestTitle: 'Fix UXF icon registry',
     }),
-    /finalization is not permitted.*"stop".*change_merged/
+    /finalization is not permitted.*"stop".*change_dismissed/
   );
-  assert.equal(
-    state.mergeRequestCreateCount,
-    mergeRequestCreateCountBeforeStoppedFinalize
-  );
-  assert.equal(progress.length, progressCountBeforeStoppedFinalize);
+  assert.equal(state.runnerExecution.phase, 'abandoned');
+  assert.equal(state.runnerCompletionByIdentityPhases.at(-1), 'abandoned');
+  state.projectProgressStatus = 'merged';
+  state.projectProgressResolution = null;
 
   const progressCountBeforeLocalStop = progress.length;
   const runLookupsBeforeLocalStop = state.agenticRunLookupCount;
@@ -212,9 +237,7 @@ export async function runPostMergeRequestContinuationIntegration(context: any) {
 
   assert.equal(state.mergeRequestCreateCount, 2);
   assert.equal(state.mergeRequestLookupCount, 1);
-  assert.deepEqual(await fs.readdir(path.join(runnerRoot, 'state')), [
-    stateFileName,
-  ]);
+  await assert.rejects(fs.access(path.join(runnerRoot, 'state')));
   assert.equal(state.mergeRequestPayload.source_branch, 'agentic/run-uxf');
   assert.equal(state.mergeRequestPayload.target_branch, 'main');
   assert.equal(progress.at(-1).status, 'in_progress');
@@ -224,19 +247,4 @@ export async function runPostMergeRequestContinuationIntegration(context: any) {
     { cwd: remotePath }
   );
   assert.match(stdout, /^[a-f0-9]{40}/);
-
-  if (process.platform !== 'win32') {
-    const realWorkspacePath = `${prepared.workspace.localPath}-real`;
-    await fs.rename(prepared.workspace.localPath, realWorkspacePath);
-    await fs.symlink(realWorkspacePath, prepared.workspace.localPath, 'dir');
-    await assert.rejects(
-      finalizeRunnerWorkspace({
-        runKey: 'run-uxf',
-        projectName: 'project-a',
-        localPath: prepared.workspace.localPath,
-        mergeRequestTitle: 'Fix UXF icon registry',
-      }),
-      /must not be a symlink/
-    );
-  }
 }

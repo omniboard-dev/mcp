@@ -6,6 +6,7 @@ import {
   AgenticRunMatchedProject,
   AgenticRunProjectState,
   AgenticRunResponse,
+  RunnerExecution,
   RunnerWorkspacePrepareResult,
   RunnerWorkspaceState,
 } from '../interface.js';
@@ -25,7 +26,18 @@ import {
   getHeadCommit,
   getRemoteBranchCommit,
 } from './git.service.js';
-import { reconcileRunnerWorkspace } from './runner-workspace-git.service.js';
+import {
+  acquireRunnerExecution,
+  checkpointRunnerExecution,
+  completeRunnerExecutionByIdentity,
+  createRunnerWorkspaceState,
+  reinitializeRunnerExecution,
+  releaseRunnerExecution,
+} from './runner-execution.service.js';
+import {
+  reconcileRunnerWorkspace,
+  RunnerWorkspaceReconciliationError,
+} from './runner-workspace-git.service.js';
 import {
   createRecoveryProgressMetadata,
   createRecoveryWorkspaceInstructions,
@@ -41,10 +53,11 @@ import {
 } from './runner-workspace-repository.service.js';
 import {
   assertGitWorkspaceIdentity,
+  assertRunnerWorkspacePath,
   assertWorkspaceIdentity,
   ensureRunnerLayout,
-  findRunnerWorkspace,
-  writeRunnerState,
+  runnerWorkspaceExists,
+  runnerWorkspacePath,
 } from './runner-workspace-store.service.js';
 import {
   getChangeRequestDetails,
@@ -120,6 +133,7 @@ async function prepareRunnerWorkspaceInternal({
   let resolvedRepositoryUrl = repositoryUrl;
   let localPath: string | undefined;
   let createdWorkspace = false;
+  let execution: RunnerExecution | undefined;
 
   try {
     const projectState = await api.refreshAgenticRunProjectState(
@@ -128,6 +142,13 @@ async function prepareRunnerWorkspaceInternal({
     );
     const continuation = await resolveAgenticRunContinuation(projectState);
     if (continuation.action !== 'continue') {
+      if (continuation.action === 'stop') {
+        await completeRunnerExecutionByIdentity(
+          runKey,
+          projectName,
+          continuation.reason === 'change_dismissed' ? 'abandoned' : 'completed'
+        );
+      }
       return createNonContinuablePreparation(projectState, continuation);
     }
 
@@ -146,7 +167,6 @@ async function prepareRunnerWorkspaceInternal({
     }
 
     const runResponse = await getRunnerAgenticRun(projectName, runKey);
-    const existingWorkspace = await findRunnerWorkspace(runKey, projectName);
 
     const resolvedGitValues = resolveRunnerGitValues(runResponse.run, {
       branch: branch ?? projectState.progress.branch ?? undefined,
@@ -219,11 +239,92 @@ async function prepareRunnerWorkspaceInternal({
       providerRebaseFailure = rebaseRequest.reason;
     }
 
+    execution = await acquireRunnerExecution({
+      runKey,
+      projectName,
+      repositoryUrl: resolvedRepositoryUrl,
+      sourceControlProvider: access.provider,
+      sourceControlRepositoryId: repository.repositoryId,
+      branch: resolvedGitValues.branchName,
+      commitMessage: resolvedGitValues.commitMessage,
+    });
+
+    const layout = await ensureRunnerLayout();
+    localPath = runnerWorkspacePath(
+      layout.workspaces,
+      projectName,
+      execution.executionKey,
+      execution.generation
+    );
+    let workspaceExists = await runnerWorkspaceExists(localPath);
+    let initializeWorkspace = execution.phase === 'preparing';
+
+    if (workspaceExists && initializeWorkspace) {
+      execution = await reinitializeRunnerExecution(execution);
+      localPath = runnerWorkspacePath(
+        layout.workspaces,
+        projectName,
+        execution.executionKey,
+        execution.generation
+      );
+      workspaceExists = await runnerWorkspaceExists(localPath);
+    } else if (!workspaceExists && !initializeWorkspace) {
+      execution = await reinitializeRunnerExecution(execution);
+      localPath = runnerWorkspacePath(
+        layout.workspaces,
+        projectName,
+        execution.executionKey,
+        execution.generation
+      );
+      workspaceExists = await runnerWorkspaceExists(localPath);
+      initializeWorkspace = true;
+    }
+    if (workspaceExists && initializeWorkspace) {
+      throw new Error(
+        'Fresh runner workspace path already exists for execution generation ' +
+          execution.generation +
+          '.'
+      );
+    }
+
     let state: RunnerWorkspaceState;
     let resumed = false;
-    if (existingWorkspace) {
-      state = existingWorkspace.state;
-      localPath = existingWorkspace.localPath;
+    if (initializeWorkspace) {
+      createdWorkspace = true;
+      await withGitCredentials(access, localPath, (env) =>
+        cloneRepository(
+          effectiveRepositoryUrl,
+          localPath!,
+          path.dirname(localPath!),
+          env
+        )
+      );
+      localPath = await assertRunnerWorkspacePath(layout.workspaces, localPath);
+      await assertGitWorkspaceIdentity(localPath);
+      const targetBranch =
+        changeRequest?.targetBranch ?? (await getDefaultBranch(localPath));
+      const remoteBranchCommit = await getRemoteBranchCommit(
+        resolvedGitValues.branchName,
+        localPath
+      );
+      if (remoteBranchCommit) {
+        await checkoutRemoteBranch(resolvedGitValues.branchName, localPath);
+        resumed = true;
+      } else {
+        await createBranch(resolvedGitValues.branchName, localPath);
+      }
+      const preparedHeadSha = (await getHeadCommit(localPath)).sha;
+      execution = await checkpointRunnerExecution(execution, {
+        phase: 'prepared',
+        targetBranch,
+        preparedHeadSha,
+        commitSha: null,
+        recovery: null,
+      });
+      state = createRunnerWorkspaceState(execution, localPath, access);
+    } else {
+      localPath = await assertRunnerWorkspacePath(layout.workspaces, localPath);
+      state = createRunnerWorkspaceState(execution, localPath, access);
       assertWorkspaceIdentity(state, runKey, projectName, localPath);
       if (state.branch !== resolvedGitValues.branchName) {
         throw new Error(
@@ -243,64 +344,32 @@ async function prepareRunnerWorkspaceInternal({
           'Retained runner workspace repository identity no longer matches the project.'
         );
       }
-      if (state.recovery) {
-        await reconcileRunnerRecoveryWorkspace(state, localPath);
-      } else {
-        await reconcileRunnerWorkspace(
-          state,
-          localPath,
-          effectiveRepositoryUrl,
-          access,
-          projectState
-        );
-      }
       state.targetBranch = changeRequest?.targetBranch ?? state.targetBranch;
-      resumed = true;
-    } else {
-      const layout = await ensureRunnerLayout();
-      localPath = await fs.mkdtemp(
-        path.join(layout.workspaces, slug(projectName) + '-')
-      );
-      createdWorkspace = true;
-      localPath = await fs.realpath(localPath);
-      await withGitCredentials(access, localPath, (env) =>
-        cloneRepository(
-          effectiveRepositoryUrl,
-          localPath!,
-          path.dirname(localPath!),
-          env
-        )
-      );
-      await assertGitWorkspaceIdentity(localPath);
-      const targetBranch =
-        changeRequest?.targetBranch ?? (await getDefaultBranch(localPath));
-      const remoteBranchCommit = await getRemoteBranchCommit(
-        resolvedGitValues.branchName,
-        localPath
-      );
-      if (remoteBranchCommit) {
-        await checkoutRemoteBranch(resolvedGitValues.branchName, localPath);
-        resumed = true;
-      } else {
-        await createBranch(resolvedGitValues.branchName, localPath);
+      try {
+        if (state.recovery) {
+          await reconcileRunnerRecoveryWorkspace(state, localPath);
+        } else {
+          await reconcileRunnerWorkspace(
+            state,
+            localPath,
+            effectiveRepositoryUrl,
+            access,
+            projectState
+          );
+        }
+      } catch (error) {
+        if (!(error instanceof RunnerWorkspaceReconciliationError)) {
+          throw error;
+        }
+        await reinitializeRunnerExecution(execution);
+        return prepareRunnerWorkspaceInternal({
+          runKey,
+          projectName,
+          repositoryUrl,
+          branch,
+        });
       }
-      const preparedHeadSha = (await getHeadCommit(localPath)).sha;
-
-      state = {
-        runKey,
-        checkName: runResponse.run.checkName,
-        projectName,
-        repositoryUrl: resolvedRepositoryUrl,
-        localPath,
-        branch: resolvedGitValues.branchName,
-        commitMessage: resolvedGitValues.commitMessage,
-        targetBranch,
-        projectPath: repository.repositoryId,
-        preparedHeadSha,
-        provider: access.provider,
-        apiBaseUrl: access.apiBaseUrl,
-      };
-      await writeRunnerState(state);
+      resumed = true;
     }
 
     if (changeRequest && continuation.reason === 'actionable_merge_block') {
@@ -358,12 +427,19 @@ async function prepareRunnerWorkspaceInternal({
     };
   } catch (error) {
     let cleanupError: unknown;
+    if (execution) {
+      try {
+        await releaseRunnerExecution(execution.executionKey);
+      } catch (caught) {
+        cleanupError = caught;
+      }
+    }
     if (localPath && createdWorkspace) {
       try {
         await fs.rm(localPath, { recursive: true, force: true });
         localPath = undefined;
       } catch (caught) {
-        cleanupError = caught;
+        cleanupError = cleanupError ?? caught;
       }
     }
 
@@ -487,13 +563,4 @@ function normalizeProviderStatus(value?: string | null) {
 
 function toErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
-}
-
-function slug(value: string) {
-  const result = value
-    .toLowerCase()
-    .replace(/[^a-z0-9._-]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 80);
-  return result || 'run';
 }

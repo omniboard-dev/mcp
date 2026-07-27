@@ -139,19 +139,26 @@ project. On first preparation, the server creates:
 .omniboard/
   mcp/
     .gitignore
-    state/
     workspaces/
 ```
 
-The generated `.gitignore` excludes `state/` and `workspaces/`. If the
-file already exists, its content is preserved and only missing runtime entries
-are added.
+The generated `.gitignore` excludes `workspaces/`. If the file already
+exists, its content is preserved and only the missing runtime entry is added.
 
-Each checkout is created under `workspaces/`. Retry metadata is stored
-separately under `state/`, records the prepared HEAD and completed commit SHA,
-and never contains repository credentials. The metadata is authenticated and
-finalization rejects modified state. Retained workspaces must be finalized with
-the same MCP key that prepared them.
+Each checkout is created under `workspaces/` at a deterministic path derived
+from the DB execution key and generation. MCP does not write accompanying JSON
+state. Prepared and committed SHAs, branch and repository identity, recovery
+metadata, lifecycle phase, and optimistic state version are stored by the
+Omniboard API. Repository credentials and local filesystem paths are never
+stored in execution state.
+
+An execution has a short renewable lease. The lease token exists only in MCP
+process memory; the API stores only its hash. DB execution state is
+authoritative; runner checkouts are disposable local working copies. If a
+checkout disappears or no longer matches its DB checkpoint, the next
+preparation increments the DB generation and recreates a fresh checkout at a
+new path from the authoritative repository and execution state. Uncheckpointed
+local state is never used as recovery state.
 
 ### Workflow
 
@@ -167,8 +174,9 @@ the same MCP key that prepared them.
 5. Run the relevant tests, lint, or build commands inside that workspace.
 6. Call `omniboard_runner_finalize_agentic_run_workspace` with the commit and
    merge request wording.
-7. Retain the workspace and state for inspection, or remove both after
-   downstream processing completes.
+7. Retain the checkout for inspection, or remove it after downstream
+   processing completes. A later preparation recreates a missing checkout from
+   DB execution state at a new generation.
 
 ### Repository access and safety
 
@@ -182,7 +190,7 @@ required. Repository and GitLab API URLs must use HTTPS by default. Local
 `file:` repositories and loopback HTTP endpoints are rejected unless the
 explicit local-test setting described above is enabled. Credentials are supplied
 through a temporary Git askpass helper and are never embedded in clone URLs,
-written to runner state, or returned from MCP tools.
+written to DB execution state, or returned from MCP tools.
 
 Finalization retrieves fresh repository access, validates the effective Git
 repository and workspace paths, disables repository-controlled credential
@@ -207,8 +215,9 @@ or report progress.
 
 Resolves one matching project and run, refreshes its merge request and pipeline
 state, and applies the shared continuation logic to canonical progress. If
-work should continue, it verifies repository access, safely reuses a retained
-signed checkout or resumes the existing remote branch, reports `in_progress`,
+work should continue, it verifies repository access, acquires the DB execution
+lease, safely reuses its validated checkout or recreates a missing or
+inconsistent checkout at a new generation, reports `in_progress`,
 and returns the prompt, result context, provider diagnostics, workspace path,
 and agent instructions. Merged or otherwise non-actionable state returns without
 a workspace. Failed application pipelines remain actionable; infrastructure-only
@@ -220,7 +229,7 @@ The branch name uses an explicit tool input first, then the agentic run
 definition, a labeled value in the prompt, and finally a generated agentic
 branch name. The commit message uses the run definition, a labeled prompt
 value, and then a run-key-based default. Both resolved values are stored in the
-signed workspace state.
+DB execution checkpoint.
 
 An optional repository URL is accepted only when it identifies a registered
 repository URL for the matched Omniboard project.
@@ -231,7 +240,7 @@ provider-refreshed detailed merge status as the recovery trigger. A provider
 `wait`; the external coordinator should prepare the project again after the
 provider finishes. If native rebase is unavailable or the change request has
 actual conflicts, MCP fetches the authoritative source and target branches,
-starts a local rebase in the signed runner workspace, reports the project as
+starts a local rebase in the leased runner workspace, reports the project as
 `blocked`, and returns the exact conflict files and resolution instructions.
 
 The coding agent resolves only those files, stages them, and calls finalization;
@@ -242,9 +251,10 @@ both branches, retries against a newly advanced target up to a bounded limit,
 and pushes the rebased source with `force-with-lease` bound to the source SHA
 that recovery started from. If the source branch advanced concurrently, no push
 is attempted; the retained workspace is reset to that remote source and must be
-prepared again. Recovery phase, attempt, target SHA, and conflict files use the
-existing authenticated workspace state and progress metadata, so no separate
-database lifecycle state is required.
+prepared again. Recovery phase, attempt, source and target SHAs, and conflict
+files are checkpointed in DB execution state after every recoverable transition. Another
+MCP process can continue after the previous lease expires by recreating or
+validating the checkout from that checkpoint.
 
 #### `omniboard_runner_finalize_agentic_run_workspace`
 
@@ -256,18 +266,26 @@ milestones.
 
 Before touching the checkout, finalization refreshes provider state and applies
 the same continuation decision used by preparation and local execution. It also
-verifies that the refreshed branch and repository still match the signed
-workspace state. A `wait` or `stop` decision aborts finalization before Git
-or provider state is changed.
+verifies that the refreshed branch and repository still match the leased DB
+execution and its deterministic checkout generation. A `wait` or `stop`
+decision aborts finalization before Git or provider state is changed.
 
 Callers must inspect the returned `completed` field. Normal finalization and a
 finished recovery return `completed: true`. Unresolved or newly surfaced rebase
 conflicts return `completed: false`, `conflictFiles`, and updated instructions
-without pushing. A successful recovery reports `pushed`, clears its signed
-recovery state, and asks Omniboard to refresh provider state immediately.
+without pushing. A successful recovery reports `pushed`, clears its DB recovery
+checkpoint, releases the execution lease, and asks Omniboard to refresh provider state
+immediately.
 
 The prepared commit message is used by default. The caller may override it and
 may also supply the merge request title, description, and Git author identity.
+
+A successful push is not terminal because review, pipeline, or rebase recovery
+may still continue. When refreshed continuation state later says the change is
+finished, MCP marks the execution `completed`; a dismissed change is marked
+`abandoned`. The API cleanup cron removes completed rows after 30 days and
+abandoned rows after 7 days in bounded batches. Foreign-key cascades also remove
+execution rows when their owning run, project, group, or organization is removed.
 
 #### `omniboard_runner_report_agentic_run_progress`
 

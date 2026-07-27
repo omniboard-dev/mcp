@@ -6,6 +6,7 @@ import {
   MCP_RUNS_ENDPOINT,
   MCP_MATCHED_PROJECTS_ENDPOINT,
   MCP_REPOSITORY_ACCESS_ENDPOINT,
+  MCP_RUN_EXECUTIONS_ENDPOINT,
   MCP_RUN_PROJECT_STATE_REFRESH_ENDPOINT,
   SETTINGS_ENDPOINT,
 } from '../consts.js';
@@ -26,6 +27,10 @@ import {
   ProjectInfo,
   Settings,
   RunnerAgenticRunsResponse,
+  RunnerExecution,
+  RunnerExecutionLeaseResponse,
+  RunnerExecutionPhase,
+  RunnerWorkspaceRebaseRecovery,
 } from '../interface.js';
 
 let apiUrl: string;
@@ -192,7 +197,113 @@ export const upsertAgenticRunProgress = (
     }
   );
 
+export const acquireRunnerExecution = (input: {
+  runKey: string;
+  projectName: string;
+  repositoryUrl: string;
+  sourceControlProvider: McpRepositoryAccess['provider'];
+  sourceControlRepositoryId: string;
+  branch: string;
+  commitMessage?: string | null;
+  leaseOwner: string;
+  leaseToken?: string;
+}): Promise<RunnerExecutionLeaseResponse> =>
+  request<RunnerExecutionLeaseResponse>(
+    MCP_RUN_EXECUTIONS_ENDPOINT + '/acquire',
+    { method: 'POST', body: JSON.stringify(input) }
+  );
+
+export const renewRunnerExecution = (
+  executionKey: string,
+  leaseToken: string
+): Promise<RunnerExecutionLeaseResponse> =>
+  request<RunnerExecutionLeaseResponse>(
+    MCP_RUN_EXECUTIONS_ENDPOINT +
+      '/' +
+      encodeURIComponent(executionKey) +
+      '/renew',
+    { method: 'POST', body: JSON.stringify({ leaseToken }) }
+  );
+
+export const checkpointRunnerExecution = (
+  executionKey: string,
+  input: {
+    leaseToken: string;
+    expectedStateVersion: number;
+    phase: RunnerExecutionPhase;
+    targetBranch?: string | null;
+    commitMessage?: string | null;
+    preparedHeadSha?: string | null;
+    commitSha?: string | null;
+    recovery?: RunnerWorkspaceRebaseRecovery | null;
+  }
+): Promise<RunnerExecution> =>
+  request<RunnerExecution>(
+    MCP_RUN_EXECUTIONS_ENDPOINT +
+      '/' +
+      encodeURIComponent(executionKey) +
+      '/checkpoint',
+    { method: 'PATCH', body: JSON.stringify(input) }
+  );
+
+export const reinitializeRunnerExecution = (
+  executionKey: string,
+  input: { leaseToken: string; expectedStateVersion: number }
+): Promise<RunnerExecution> =>
+  request<RunnerExecution>(
+    MCP_RUN_EXECUTIONS_ENDPOINT +
+      '/' +
+      encodeURIComponent(executionKey) +
+      '/reinitialize',
+    { method: 'POST', body: JSON.stringify(input) }
+  );
+
+export const completeRunnerExecutionByIdentity = (input: {
+  runKey: string;
+  projectName: string;
+  phase: 'completed' | 'abandoned';
+}): Promise<{ completed: boolean; execution: RunnerExecution | null }> =>
+  request<{ completed: boolean; execution: RunnerExecution | null }>(
+    MCP_RUN_EXECUTIONS_ENDPOINT + '/complete-by-identity',
+    { method: 'POST', body: JSON.stringify(input) }
+  );
+
+export const completeRunnerExecution = (
+  executionKey: string,
+  input: {
+    leaseToken: string;
+    expectedStateVersion: number;
+    phase: 'completed' | 'abandoned';
+  }
+): Promise<RunnerExecution> =>
+  request<RunnerExecution>(
+    MCP_RUN_EXECUTIONS_ENDPOINT +
+      '/' +
+      encodeURIComponent(executionKey) +
+      '/complete',
+    { method: 'POST', body: JSON.stringify(input) }
+  );
+
+export const releaseRunnerExecution = (
+  executionKey: string,
+  leaseToken: string
+): Promise<RunnerExecution> =>
+  request<RunnerExecution>(
+    MCP_RUN_EXECUTIONS_ENDPOINT +
+      '/' +
+      encodeURIComponent(executionKey) +
+      '/release',
+    { method: 'POST', body: JSON.stringify({ leaseToken }) }
+  );
+
 type QueryValue = string | number | boolean | null | undefined;
+
+export class OmniboardApiError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+    this.name = 'OmniboardApiError';
+  }
+}
 
 async function request<T>(
   endpoint: string,
@@ -227,9 +338,10 @@ async function request<T>(
       body = undefined;
     }
 
-    throw new Error(
+    throw new OmniboardApiError(
       body?.message ??
-        `Omniboard API request failed with ${response.status} ${response.statusText}`
+        `Omniboard API request failed with ${response.status} ${response.statusText}`,
+      response.status
     );
   }
 

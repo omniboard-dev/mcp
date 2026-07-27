@@ -21,15 +21,19 @@ import {
   skipRebase,
   startRebase,
 } from './git.service.js';
-import { assertCurrentRunnerBranch } from './runner-workspace-git.service.js';
+import {
+  assertCurrentRunnerBranch,
+  RunnerWorkspaceReconciliationError,
+} from './runner-workspace-git.service.js';
 import {
   assertAuthorizedRepositoryUrl,
   withGitCredentials,
 } from './runner-workspace-repository.service.js';
 import {
-  assertGitWorkspaceIdentity,
+  releaseRunnerExecution,
   writeRunnerState,
-} from './runner-workspace-store.service.js';
+} from './runner-execution.service.js';
+import { assertGitWorkspaceIdentity } from './runner-workspace-store.service.js';
 import {
   getChangeRequestDetails,
   providerLabel,
@@ -97,6 +101,7 @@ export async function finalizeRunnerRebaseRecovery(
     }
     recovery.phase = 'ready_to_push';
     recovery.conflictFiles = [];
+    await writeRunnerState(state);
   }
 
   await assertCurrentRunnerBranch(state, localPath);
@@ -303,7 +308,7 @@ export async function finalizeRunnerRebaseRecovery(
   state.recovery = undefined;
   state.preparedHeadSha = commitSha;
   state.commitSha = commitSha;
-  await writeRunnerState(state);
+  await writeRunnerState(state, 'pushed');
   progressReports.push(
     await reportRunnerAgenticRunProgressSafely(
       state.runKey,
@@ -335,6 +340,7 @@ export async function finalizeRunnerRebaseRecovery(
       (error instanceof Error ? error.message : String(error));
   }
 
+  await releaseRunnerExecution(state.executionKey);
   return {
     completed: true,
     workspace: state,
@@ -464,7 +470,6 @@ export async function prepareRunnerRebaseRecovery(
     const conflictFiles = await getConflictedFiles(localPath);
     if (!conflictFiles.length) {
       state.recovery = undefined;
-      await writeRunnerState(state);
       throw error;
     }
     recovery.phase = 'conflicts';
@@ -510,7 +515,14 @@ export async function reconcileRunnerRecoveryWorkspace(
   state: RunnerWorkspaceState,
   localPath: string
 ) {
-  await assertGitWorkspaceIdentity(localPath);
+  try {
+    await assertGitWorkspaceIdentity(localPath);
+  } catch (error) {
+    throw recoveryReconciliationError(
+      'The retained recovery checkout no longer has a valid runner Git workspace identity.',
+      error
+    );
+  }
   const recovery = state.recovery;
   if (!recovery) return;
 
@@ -520,22 +532,42 @@ export async function reconcileRunnerRecoveryWorkspace(
     await writeRunnerState(state);
     return;
   }
+  if (recovery.phase === 'conflicts') {
+    throw new RunnerWorkspaceReconciliationError(
+      'DB execution state expects rebase conflicts, but the retained checkout has no rebase in progress.'
+    );
+  }
   if (rebaseInProgress) {
-    throw new Error(
-      'Runner workspace has an unexpected in-progress rebase recovery state.'
+    throw new RunnerWorkspaceReconciliationError(
+      'The retained checkout has an in-progress rebase not present in DB recovery state.'
     );
   }
 
-  await assertCurrentRunnerBranch(state, localPath);
+  try {
+    await assertCurrentRunnerBranch(state, localPath);
+  } catch (error) {
+    throw recoveryReconciliationError(
+      'The retained recovery checkout branch no longer matches DB execution state.',
+      error
+    );
+  }
   if (await getWorkingTreeStatus(localPath)) {
-    throw new Error(
+    throw new RunnerWorkspaceReconciliationError(
       'Recovered runner workspace has local changes outside an in-progress rebase.'
     );
   }
-  recovery.phase = 'ready_to_push';
-  recovery.conflictFiles = [];
-  state.preparedHeadSha = (await getHeadCommit(localPath)).sha;
-  await writeRunnerState(state);
+  const head = await getHeadCommit(localPath);
+  if (head.sha !== state.preparedHeadSha) {
+    throw new RunnerWorkspaceReconciliationError(
+      'The retained recovery checkout HEAD no longer matches DB execution state.'
+    );
+  }
+}
+
+function recoveryReconciliationError(message: string, cause: unknown) {
+  return new RunnerWorkspaceReconciliationError(
+    message + ' ' + (cause instanceof Error ? cause.message : String(cause))
+  );
 }
 
 export function createRecoveryProgressMetadata(

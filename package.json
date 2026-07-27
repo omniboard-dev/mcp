@@ -19,8 +19,9 @@
     "sync:dist-version": "node tooling/sync-dist-version.js",
     "release": "npm run format:write && npm run build && standard-version -a && npm run sync:dist-version && git push --follow-tags origin main && npm publish --access public",
     "test:runner": "npm run build && ts-node-esm --project tsconfig.test.json test/integration/runner-workspace.integration.ts",
+    "test:lease": "npm run build && ts-node-esm --project tsconfig.test.json test/integration/runner-execution-lease.integration.ts",
     "test:tools": "npm run build && ts-node-esm --project tsconfig.test.json test/integration/mcp-tools.integration.ts",
-    "test": "npm run test:typecheck && npm run test:tools && npm run test:runner",
+    "test": "npm run test:typecheck && npm run test:tools && npm run test:lease && npm run test:runner",
     "test:typecheck": "tsc -p tsconfig.test.json"
   },
   "dependencies": {

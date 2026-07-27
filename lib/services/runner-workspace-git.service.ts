@@ -12,12 +12,13 @@ import {
   getRemoteBranchCommit,
   getWorkingTreeStatus,
   isAncestor,
+  isRebaseInProgress,
 } from './git.service.js';
 import { withGitCredentials } from './runner-workspace-repository.service.js';
-import {
-  assertGitWorkspaceIdentity,
-  writeRunnerState,
-} from './runner-workspace-store.service.js';
+import { writeRunnerState } from './runner-execution.service.js';
+import { assertGitWorkspaceIdentity } from './runner-workspace-store.service.js';
+
+export class RunnerWorkspaceReconciliationError extends Error {}
 
 export async function reconcileRunnerWorkspace(
   state: RunnerWorkspaceState,
@@ -26,8 +27,27 @@ export async function reconcileRunnerWorkspace(
   access: McpRepositoryAccess,
   projectState: AgenticRunProjectState
 ) {
-  await assertGitWorkspaceIdentity(localPath);
-  await assertCurrentRunnerBranch(state, localPath);
+  try {
+    await assertGitWorkspaceIdentity(localPath);
+  } catch (error) {
+    throw reconciliationError(
+      'The retained checkout no longer has a valid runner Git workspace identity.',
+      error
+    );
+  }
+  if (await isRebaseInProgress(localPath)) {
+    throw new RunnerWorkspaceReconciliationError(
+      'The retained checkout has an in-progress rebase not present in DB execution state.'
+    );
+  }
+  try {
+    await assertCurrentRunnerBranch(state, localPath);
+  } catch (error) {
+    throw reconciliationError(
+      'The retained checkout branch no longer matches DB execution state.',
+      error
+    );
+  }
   if (
     projectState.progress.branch &&
     projectState.progress.branch !== state.branch
@@ -60,14 +80,14 @@ export async function reconcileRunnerWorkspace(
   const hasVerifiedLocalHead =
     head.sha === state.preparedHeadSha || head.sha === state.commitSha;
   if (!remoteCommit && !hasVerifiedLocalHead) {
-    throw new Error(
+    throw new RunnerWorkspaceReconciliationError(
       'The retained workspace contains an unverified local commit.'
     );
   }
   if (remoteCommit && remoteCommit !== head.sha) {
     if (await isAncestor(head.sha, remoteCommit, localPath)) {
       if (workingTreeStatus) {
-        throw new Error(
+        throw new RunnerWorkspaceReconciliationError(
           'The remote branch advanced while the retained workspace has local changes.'
         );
       }
@@ -75,12 +95,12 @@ export async function reconcileRunnerWorkspace(
       head = await getHeadCommit(localPath);
     } else if (await isAncestor(remoteCommit, head.sha, localPath)) {
       if (!hasVerifiedLocalHead) {
-        throw new Error(
+        throw new RunnerWorkspaceReconciliationError(
           'The retained workspace contains an unverified local commit.'
         );
       }
     } else {
-      throw new Error(
+      throw new RunnerWorkspaceReconciliationError(
         'The retained workspace and remote provider branch have diverged.'
       );
     }
@@ -89,6 +109,12 @@ export async function reconcileRunnerWorkspace(
   state.preparedHeadSha = head.sha;
   state.commitSha = undefined;
   await writeRunnerState(state);
+}
+
+function reconciliationError(message: string, cause: unknown) {
+  return new RunnerWorkspaceReconciliationError(
+    message + ' ' + toErrorMessage(cause)
+  );
 }
 
 export async function createRunnerCommit(
