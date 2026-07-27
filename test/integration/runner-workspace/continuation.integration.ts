@@ -1,0 +1,242 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+
+export async function runPostMergeRequestContinuationIntegration(context: any) {
+  const {
+    root,
+    remotePath,
+    seedPath,
+    registeredFileRepositoryUrl,
+    tokenLeakPath,
+    serverSecretLeakPath,
+    ambientSecretLeakPath,
+    runnerRoot,
+    progress,
+    repositoryAccessRequests,
+    state,
+    server,
+    execFile,
+    commitForTest,
+    normalizeProjectPath,
+    pathToFileUrl,
+    prepareRunnerWorkspace,
+    finalizeRunnerWorkspace,
+    resolveRunnerGitValues,
+    prepared,
+    stateFileName,
+  } = context;
+
+  const { getAgenticRun } = await import(
+    '../../../dist/services/agentic-runs.service.js'
+  );
+  const { validateAgenticRun } = await import(
+    '../../../dist/services/analyzer-validation.service.js'
+  );
+
+  state.projectProgressStatus = 'failed';
+  state.projectPipelineStatus = 'failed';
+  state.projectMergeRequestUrl =
+    'https://gitlab.example.com/group/project/-/merge_requests/3';
+  state.projectMergeRequestState = 'opened';
+  const failedPipelineContinuation = await prepareRunnerWorkspace({
+    runKey: 'run-uxf',
+    projectName: 'project-a',
+  });
+  assert.equal(
+    failedPipelineContinuation.projectState.progress.status,
+    'failed'
+  );
+  assert.equal(failedPipelineContinuation.continuation.action, 'continue');
+  assert.equal(
+    failedPipelineContinuation.continuation.reason,
+    'application_pipeline_failure'
+  );
+  assert.equal(
+    failedPipelineContinuation.workspace.localPath,
+    prepared.workspace.localPath
+  );
+  assert(
+    failedPipelineContinuation.instructions.some((instruction) =>
+      instruction.includes('Expected true, received false')
+    )
+  );
+
+  state.projectPipelineFailureReason = 'runner_system_failure';
+  state.projectPipelineUrl =
+    'https://gitlab.example.com/group/project/-/pipelines/321';
+  const pipelineRetriesBeforeInfrastructureWait = state.pipelineRetryCount;
+  const matchedLookupsBeforeInfrastructureWait =
+    state.matchedProjectsLookupCount;
+  const runLookupsBeforeInfrastructureWait = state.agenticRunLookupCount;
+  const infrastructureFailureContinuation = await prepareRunnerWorkspace({
+    runKey: 'run-uxf',
+    projectName: 'project-a',
+  });
+  assert.equal(infrastructureFailureContinuation.continuation.action, 'wait');
+  assert.equal(
+    infrastructureFailureContinuation.continuation.reason,
+    'infrastructure_pipeline_failure'
+  );
+  assert.equal(infrastructureFailureContinuation.workspace, undefined);
+  assert.equal(
+    infrastructureFailureContinuation.continuation.pipelineRetry.retried,
+    true
+  );
+  assert.equal(
+    infrastructureFailureContinuation.continuation.pipelineRetry.status,
+    'pending'
+  );
+  assert.equal(
+    state.pipelineRetryCount,
+    pipelineRetriesBeforeInfrastructureWait + 1
+  );
+  assert(
+    infrastructureFailureContinuation.instructions.some((instruction) =>
+      instruction.includes('retry was requested successfully')
+    )
+  );
+  assert.equal(
+    state.matchedProjectsLookupCount,
+    matchedLookupsBeforeInfrastructureWait
+  );
+  assert.equal(state.agenticRunLookupCount, runLookupsBeforeInfrastructureWait);
+  state.projectPipelineFailureReason = 'script_failure';
+  state.projectPipelineUrl = null;
+
+  const matchedLookupsBeforeProviderWait = state.matchedProjectsLookupCount;
+  const runLookupsBeforeProviderWait = state.agenticRunLookupCount;
+  state.providerSyncSuccess = false;
+  const providerFailureContinuation = await prepareRunnerWorkspace({
+    runKey: 'run-uxf',
+    projectName: 'project-a',
+  });
+  assert.equal(providerFailureContinuation.continuation.action, 'wait');
+  assert.equal(
+    providerFailureContinuation.continuation.reason,
+    'provider_sync_failed'
+  );
+  assert.equal(providerFailureContinuation.workspace, undefined);
+  assert.equal(
+    state.matchedProjectsLookupCount,
+    matchedLookupsBeforeProviderWait
+  );
+  assert.equal(state.agenticRunLookupCount, runLookupsBeforeProviderWait);
+  state.providerSyncSuccess = true;
+
+  state.projectProgressStatus = 'future_status';
+  state.projectPipelineStatus = null;
+  const unsupportedStatusContinuation = await prepareRunnerWorkspace({
+    runKey: 'run-uxf',
+    projectName: 'project-a',
+  });
+  assert.equal(unsupportedStatusContinuation.continuation.action, 'wait');
+  assert.equal(
+    unsupportedStatusContinuation.continuation.reason,
+    'unsupported_progress_status'
+  );
+  assert.equal(unsupportedStatusContinuation.workspace, undefined);
+
+  state.projectProgressStatus = 'merged';
+  state.projectPipelineStatus = 'success';
+  state.projectMergeRequestState = 'merged';
+  const matchedLookupsBeforeMergedStop = state.matchedProjectsLookupCount;
+  const runLookupsBeforeMergedStop = state.agenticRunLookupCount;
+  const mergedPreparation = await prepareRunnerWorkspace({
+    runKey: 'run-uxf',
+    projectName: 'project-a',
+  });
+  assert.equal(mergedPreparation.projectState.progress.status, 'merged');
+  assert.equal(mergedPreparation.continuation.action, 'stop');
+  assert.equal(mergedPreparation.workspace, undefined);
+  assert.equal(
+    state.matchedProjectsLookupCount,
+    matchedLookupsBeforeMergedStop
+  );
+  assert.equal(state.agenticRunLookupCount, runLookupsBeforeMergedStop);
+
+  const mergeRequestCreateCountBeforeStoppedFinalize =
+    state.mergeRequestCreateCount;
+  const progressCountBeforeStoppedFinalize = progress.length;
+  await assert.rejects(
+    finalizeRunnerWorkspace({
+      runKey: 'run-uxf',
+      projectName: 'project-a',
+      localPath: prepared.workspace.localPath,
+      mergeRequestTitle: 'Fix UXF icon registry',
+    }),
+    /finalization is not permitted.*"stop".*change_merged/
+  );
+  assert.equal(
+    state.mergeRequestCreateCount,
+    mergeRequestCreateCountBeforeStoppedFinalize
+  );
+  assert.equal(progress.length, progressCountBeforeStoppedFinalize);
+
+  const progressCountBeforeLocalStop = progress.length;
+  const runLookupsBeforeLocalStop = state.agenticRunLookupCount;
+  const localMergedRun = await getAgenticRun('run-uxf');
+  assert.equal(localMergedRun.continuation.action, 'stop');
+  assert.deepEqual(
+    localMergedRun.agentContext.instructions,
+    mergedPreparation.instructions
+  );
+  assert.equal(localMergedRun.agentContext.validation.allowed, false);
+  assert.equal(state.agenticRunLookupCount, runLookupsBeforeLocalStop);
+  assert.equal(progress.length, progressCountBeforeLocalStop);
+
+  const skippedMergedValidation = await validateAgenticRun('run-uxf');
+  assert.equal(skippedMergedValidation.skipped, true);
+  assert.equal(skippedMergedValidation.continuation.action, 'stop');
+  assert.equal(skippedMergedValidation.progressReport, undefined);
+  assert.equal(progress.length, progressCountBeforeLocalStop);
+
+  const runLookupCountBeforeNoMatch = state.agenticRunLookupCount;
+  const progressCountBeforeNoMatch = progress.length;
+  state.projectMatchesCheck = false;
+  const localNoMatchRun = await getAgenticRun('run-uxf');
+  assert.equal(localNoMatchRun.continuation.action, 'stop');
+  assert.equal(
+    localNoMatchRun.continuation.reason,
+    'project_no_longer_matches'
+  );
+  assert.equal(state.agenticRunLookupCount, runLookupCountBeforeNoMatch);
+  assert.equal(progress.length, progressCountBeforeNoMatch);
+  state.projectMatchesCheck = true;
+
+  await assert.rejects(fs.access(tokenLeakPath));
+  await assert.rejects(fs.access(serverSecretLeakPath));
+  if (process.platform !== 'win32') {
+    assert.equal(await fs.readFile(ambientSecretLeakPath, 'utf8'), 'unset');
+  }
+
+  assert.equal(state.mergeRequestCreateCount, 2);
+  assert.equal(state.mergeRequestLookupCount, 1);
+  assert.deepEqual(await fs.readdir(path.join(runnerRoot, 'state')), [
+    stateFileName,
+  ]);
+  assert.equal(state.mergeRequestPayload.source_branch, 'agentic/run-uxf');
+  assert.equal(state.mergeRequestPayload.target_branch, 'main');
+  assert.equal(progress.at(-1).status, 'in_progress');
+  const { stdout } = await execFile(
+    'git',
+    ['show-ref', '--verify', 'refs/heads/agentic/run-uxf'],
+    { cwd: remotePath }
+  );
+  assert.match(stdout, /^[a-f0-9]{40}/);
+
+  if (process.platform !== 'win32') {
+    const realWorkspacePath = `${prepared.workspace.localPath}-real`;
+    await fs.rename(prepared.workspace.localPath, realWorkspacePath);
+    await fs.symlink(realWorkspacePath, prepared.workspace.localPath, 'dir');
+    await assert.rejects(
+      finalizeRunnerWorkspace({
+        runKey: 'run-uxf',
+        projectName: 'project-a',
+        localPath: prepared.workspace.localPath,
+        mergeRequestTitle: 'Fix UXF icon registry',
+      }),
+      /must not be a symlink/
+    );
+  }
+}

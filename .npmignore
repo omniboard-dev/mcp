@@ -1,5 +1,9 @@
 lib
+test
+tooling
 .idea
 .prettierrc
 .prettierignore
 tsconfig.json
+tsconfig.test.json
+node_modules

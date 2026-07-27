@@ -13,8 +13,9 @@ interface BitbucketPullRequestResponse {
   id?: number;
   state?: string;
   title?: string;
-  fromRef?: { id?: string };
-  toRef?: { id?: string };
+  version?: number;
+  fromRef?: { id?: string; latestCommit?: string | null };
+  toRef?: { id?: string; latestCommit?: string | null };
   links?: { self?: Array<{ href?: string }> };
 }
 
@@ -101,6 +102,95 @@ export async function createBitbucketPullRequest(
       response.status
     } ${response.statusText}: ${await readError(response)}`
   );
+}
+
+export async function getBitbucketPullRequestDetails(
+  access: BitbucketDataCenterRepositoryAccess,
+  repositoryId: string,
+  mergeRequestUrl: string
+) {
+  const apiBaseUrl = resolveBitbucketApiBaseUrl(access.apiBaseUrl);
+  const identity = parseRepositoryId(repositoryId);
+  const pullRequestId = resolveBitbucketPullRequestId(access, mergeRequestUrl);
+  const endpoint = `${repositoryEndpoint(
+    apiBaseUrl,
+    identity
+  )}/pull-requests/${pullRequestId}`;
+  const response = await fetch(endpoint, { headers: bitbucketHeaders(access) });
+  if (!response.ok) {
+    throw new Error(
+      `Bitbucket Data Center pull request lookup failed with ${
+        response.status
+      } ${response.statusText}: ${await readError(response)}`
+    );
+  }
+  const pullRequest = (await response.json()) as BitbucketPullRequestResponse;
+  const sourceBranch = normalizeBranchRef(pullRequest.fromRef?.id);
+  const targetBranch = normalizeBranchRef(pullRequest.toRef?.id);
+  if (!sourceBranch || !targetBranch) {
+    throw new Error(
+      'Bitbucket Data Center pull request response did not include source and target branches.'
+    );
+  }
+  return {
+    id: pullRequest.id ?? pullRequestId,
+    url: resolvePullRequestUrl(pullRequest) ?? mergeRequestUrl,
+    state: pullRequest.state?.toLowerCase() ?? 'open',
+    title: pullRequest.title ?? '',
+    sourceBranch,
+    targetBranch,
+    sourceHeadSha: pullRequest.fromRef?.latestCommit ?? null,
+    targetHeadSha: pullRequest.toRef?.latestCommit ?? null,
+    version: pullRequest.version ?? null,
+    detailedStatus: null,
+    rebaseInProgress: false,
+    rebaseError: null,
+  };
+}
+
+export async function requestBitbucketPullRequestRebase(
+  access: BitbucketDataCenterRepositoryAccess,
+  repositoryId: string,
+  mergeRequestUrl: string
+) {
+  const details = await getBitbucketPullRequestDetails(
+    access,
+    repositoryId,
+    mergeRequestUrl
+  );
+  if (details.version === null) {
+    return {
+      requested: false as const,
+      reason: 'Bitbucket Data Center pull request did not include a version.',
+    };
+  }
+  const apiBaseUrl = resolveBitbucketApiBaseUrl(access.apiBaseUrl);
+  const identity = parseRepositoryId(repositoryId);
+  const gitApiBaseUrl = apiBaseUrl.replace(
+    /\/rest\/api\/(?:latest|1\.0)$/,
+    '/rest/git/latest'
+  );
+  const endpoint = `${repositoryEndpoint(
+    gitApiBaseUrl,
+    identity
+  )}/pull-requests/${details.id}/rebase`;
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      ...bitbucketHeaders(access),
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ version: details.version }),
+  });
+  if (!response.ok) {
+    return {
+      requested: false as const,
+      reason: `Bitbucket Data Center pull request rebase failed with ${
+        response.status
+      } ${response.statusText}: ${await readError(response)}`,
+    };
+  }
+  return { requested: true as const, inProgress: false };
 }
 
 function resolveBitbucketRepositoryIdentity(repositoryUrl: string) {
@@ -208,8 +298,49 @@ async function findOpenPullRequest(
   }
 }
 
+function resolveBitbucketPullRequestId(
+  access: BitbucketDataCenterRepositoryAccess,
+  mergeRequestUrl: string
+) {
+  let url: URL;
+  try {
+    url = new URL(mergeRequestUrl);
+  } catch {
+    throw new Error(
+      `Invalid Bitbucket Data Center pull request URL "${mergeRequestUrl}".`
+    );
+  }
+  if (url.username || url.password) {
+    throw new Error(
+      'Bitbucket Data Center pull request URLs must not contain credentials.'
+    );
+  }
+  const credentialHost = new URL(
+    access.host.includes('://') ? access.host : `https://${access.host}`
+  ).host;
+  if (url.host.toLowerCase() !== credentialHost.toLowerCase()) {
+    throw new Error(
+      `Bitbucket Data Center pull request host "${url.host}" does not match credential host "${access.host}".`
+    );
+  }
+  const match = /\/pull-requests\/(\d+)(?:\/|$)/i.exec(url.pathname);
+  if (!match) {
+    throw new Error(
+      `Bitbucket Data Center pull request URL "${mergeRequestUrl}" does not include a numeric pull request ID.`
+    );
+  }
+  return Number(match[1]);
+}
+
+function normalizeBranchRef(ref?: string) {
+  return ref?.replace(/^refs\/heads\//, '') || null;
+}
+
+function resolvePullRequestUrl(response: BitbucketPullRequestResponse) {
+  return response.links?.self?.find((link) => link.href)?.href;
+}
 function normalizePullRequest(response: BitbucketPullRequestResponse) {
-  const url = response.links?.self?.find((link) => link.href)?.href;
+  const url = resolvePullRequestUrl(response);
   if (!url) {
     throw new Error(
       'Bitbucket Data Center pull request response did not include a self link.'

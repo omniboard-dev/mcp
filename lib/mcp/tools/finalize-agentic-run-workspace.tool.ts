@@ -6,7 +6,7 @@ import { McpToolDefinition } from '../shared.js';
 export const finalizeAgenticRunWorkspaceTool: McpToolDefinition = {
   name: 'omniboard_runner_finalize_agentic_run_workspace',
   description:
-    'Dedicated runner mode: commit the prepared workspace changes using the prepared run commit message unless overridden, retrieve fresh repository access, push the agentic branch to the validated repository URL, create or reuse a change request, and report committed, pushed, and change-request progress to Omniboard.',
+    'Dedicated runner mode: finalize normal work or continue a prepared merge-conflict recovery. Normal work is committed, pushed, and linked to a change request. Recovery may return completed=false with the next exact conflict files; when complete it rebases onto the latest target and updates the validated source branch with force-with-lease.',
   inputSchema: {
     runKey: z.string().min(1),
     projectName: z.string().min(1),

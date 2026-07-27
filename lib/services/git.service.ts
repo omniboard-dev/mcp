@@ -143,7 +143,7 @@ export async function fetchBranch(
       '--no-tags',
       '--',
       repositoryUrl,
-      `refs/heads/${branch}:refs/remotes/origin/${branch}`,
+      `+refs/heads/${branch}:refs/remotes/origin/${branch}`,
     ],
     targetDir,
     env
@@ -165,6 +165,20 @@ export async function getRefCommit(
 export function getRemoteBranchCommit(branch: string, targetDir: string) {
   validateBranch(branch);
   return getRefCommit(`refs/remotes/origin/${branch}`, targetDir);
+}
+
+export async function resetBranchToRemote(branch: string, targetDir: string) {
+  validateBranch(branch);
+  await runGit(
+    [
+      '-c',
+      'core.hooksPath=/dev/null',
+      'reset',
+      '--hard',
+      `refs/remotes/origin/${branch}`,
+    ],
+    targetDir
+  );
 }
 
 export async function isAncestor(
@@ -211,6 +225,65 @@ export async function checkoutRemoteBranch(branch: string, targetDir: string) {
     ],
     targetDir
   );
+}
+
+export async function startRebase(branch: string, targetDir: string) {
+  validateBranch(branch);
+  await runGit(
+    [
+      '-c',
+      'core.hooksPath=/dev/null',
+      '-c',
+      'sequence.editor=true',
+      'rebase',
+      `refs/remotes/origin/${branch}`,
+    ],
+    targetDir
+  );
+}
+
+export async function continueRebase(targetDir: string) {
+  await runGit(['-c', 'core.fsmonitor=false', 'add', '--all'], targetDir);
+  await runGit(
+    [
+      '-c',
+      'core.hooksPath=/dev/null',
+      '-c',
+      'core.editor=true',
+      'rebase',
+      '--continue',
+    ],
+    targetDir
+  );
+}
+
+export async function skipRebase(targetDir: string) {
+  await runGit(
+    [
+      '-c',
+      'core.hooksPath=/dev/null',
+      '-c',
+      'core.editor=true',
+      'rebase',
+      '--skip',
+    ],
+    targetDir
+  );
+}
+
+export async function isRebaseInProgress(targetDir: string) {
+  return Boolean(await getRefCommit('REBASE_HEAD', targetDir));
+}
+
+export async function getConflictedFiles(targetDir: string) {
+  const { stdout } = await runGit(
+    ['diff', '--name-only', '--diff-filter=U'],
+    targetDir
+  );
+  return stdout
+    .split('\n')
+    .map((file) => file.trim())
+    .filter(Boolean);
 }
 
 export async function getWorkingTreeStatus(targetDir: string) {
@@ -284,6 +357,33 @@ export async function pushBranch(
   );
 }
 
+export async function pushBranchWithLease(
+  repositoryUrl: string,
+  branch: string,
+  expectedRemoteCommit: string,
+  targetDir: string,
+  env: NodeJS.ProcessEnv
+) {
+  validateBranch(branch);
+  validateCommit(expectedRemoteCommit);
+  await runGit(
+    [
+      '-c',
+      'credential.helper=',
+      '-c',
+      'core.hooksPath=/dev/null',
+      'push',
+      '--no-verify',
+      `--force-with-lease=refs/heads/${branch}:${expectedRemoteCommit}`,
+      '--',
+      repositoryUrl,
+      `refs/heads/${branch}:refs/heads/${branch}`,
+    ],
+    targetDir,
+    env
+  );
+}
+
 function runGit(
   args: string[],
   targetDir: string,
@@ -310,5 +410,11 @@ function selectProcessEnvironment(
 function validateBranch(branch: string) {
   if (!/^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(branch)) {
     throw new Error(`Invalid Git branch name "${branch}".`);
+  }
+}
+
+function validateCommit(commit: string) {
+  if (!/^[a-f0-9]{40,64}$/i.test(commit)) {
+    throw new Error(`Invalid Git commit "${commit}".`);
   }
 }

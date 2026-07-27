@@ -6,10 +6,20 @@ import {
 
 interface GitlabMergeRequestResponse {
   id?: number;
+  detailed_merge_status?: string | null;
+  merge_error?: string | null;
+  rebase_in_progress?: boolean;
   iid?: number;
   web_url?: string;
+  sha?: string | null;
+  source_branch?: string;
+  target_branch?: string;
   state?: string;
   title?: string;
+}
+
+interface GitlabMergeRequestRebaseResponse {
+  rebase_in_progress?: boolean;
 }
 
 interface GitlabProjectResponse {
@@ -175,6 +185,82 @@ export async function createGitlabMergeRequest(
   );
 }
 
+export async function getGitlabMergeRequestDetails(
+  access: GitlabRepositoryAccess,
+  projectPath: string,
+  mergeRequestUrl: string
+) {
+  const apiBaseUrl = resolveGitlabApiBaseUrl(access.apiBaseUrl);
+  const normalizedProjectPath = normalizeProjectPath(projectPath);
+  const mergeRequestIid = resolveGitlabMergeRequestIid(access, mergeRequestUrl);
+  const endpoint = new URL(
+    `${apiBaseUrl}/projects/${encodeURIComponent(
+      normalizedProjectPath
+    )}/merge_requests/${mergeRequestIid}`
+  );
+  endpoint.searchParams.set('include_rebase_in_progress', 'true');
+  const response = await fetch(endpoint, {
+    headers: { 'PRIVATE-TOKEN': access.token },
+  });
+  if (!response.ok) {
+    throw new Error(
+      `GitLab merge request lookup failed with ${response.status} ${
+        response.statusText
+      }: ${await readError(response)}`
+    );
+  }
+
+  const mergeRequest = (await response.json()) as GitlabMergeRequestResponse;
+  if (!mergeRequest.source_branch || !mergeRequest.target_branch) {
+    throw new Error(
+      'GitLab merge request response did not include source_branch and target_branch.'
+    );
+  }
+  return {
+    id: mergeRequest.id,
+    iid: mergeRequest.iid ?? mergeRequestIid,
+    url: mergeRequest.web_url ?? mergeRequestUrl,
+    state: mergeRequest.state ?? 'opened',
+    title: mergeRequest.title ?? '',
+    sourceBranch: mergeRequest.source_branch,
+    targetBranch: mergeRequest.target_branch,
+    sourceHeadSha: mergeRequest.sha ?? null,
+    detailedStatus: mergeRequest.detailed_merge_status ?? null,
+    rebaseInProgress: mergeRequest.rebase_in_progress ?? false,
+    rebaseError: mergeRequest.merge_error ?? null,
+  };
+}
+
+export async function requestGitlabMergeRequestRebase(
+  access: GitlabRepositoryAccess,
+  projectPath: string,
+  mergeRequestUrl: string
+) {
+  const apiBaseUrl = resolveGitlabApiBaseUrl(access.apiBaseUrl);
+  const normalizedProjectPath = normalizeProjectPath(projectPath);
+  const mergeRequestIid = resolveGitlabMergeRequestIid(access, mergeRequestUrl);
+  const endpoint = `${apiBaseUrl}/projects/${encodeURIComponent(
+    normalizedProjectPath
+  )}/merge_requests/${mergeRequestIid}/rebase`;
+  const response = await fetch(endpoint, {
+    method: 'PUT',
+    headers: { 'PRIVATE-TOKEN': access.token },
+  });
+  if (!response.ok) {
+    return {
+      requested: false as const,
+      reason: `GitLab merge request rebase failed with ${response.status} ${
+        response.statusText
+      }: ${await readError(response)}`,
+    };
+  }
+  const result = (await response.json()) as GitlabMergeRequestRebaseResponse;
+  return {
+    requested: true as const,
+    inProgress: result.rebase_in_progress ?? true,
+  };
+}
+
 export async function retryGitlabPipeline(
   access: GitlabRepositoryAccess,
   repositoryUrl: string,
@@ -335,6 +421,33 @@ function resolveRepositoryProjectPath(
     throw new Error(`Invalid GitLab repository URL "${repositoryUrl}".`);
   }
   return normalizeProjectPath(scpPath);
+}
+
+function resolveGitlabMergeRequestIid(
+  access: GitlabRepositoryAccess,
+  mergeRequestUrl: string
+) {
+  let url: URL;
+  try {
+    url = new URL(mergeRequestUrl);
+  } catch {
+    throw new Error(`Invalid GitLab merge request URL "${mergeRequestUrl}".`);
+  }
+  if (url.username || url.password) {
+    throw new Error('GitLab merge request URLs must not contain credentials.');
+  }
+  if (url.host.toLowerCase() !== normalizeGitlabHost(access.host)) {
+    throw new Error(
+      `GitLab merge request host "${url.host}" does not match credential host "${access.host}".`
+    );
+  }
+  const match = /\/merge_requests\/(\d+)(?:\/|$)/.exec(url.pathname);
+  if (!match) {
+    throw new Error(
+      `GitLab merge request URL "${mergeRequestUrl}" does not include a numeric merge request IID.`
+    );
+  }
+  return Number(match[1]);
 }
 
 function normalizeProjectPath(projectPath: unknown) {

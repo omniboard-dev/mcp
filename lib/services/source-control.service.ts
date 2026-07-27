@@ -1,10 +1,14 @@
 import { McpRepositoryAccess } from '../interface.js';
 import {
   createBitbucketPullRequest,
+  getBitbucketPullRequestDetails,
+  requestBitbucketPullRequestRebase,
   validateBitbucketRepositoryAccess,
 } from './bitbucket-data-center.service.js';
 import {
   createGitlabMergeRequest,
+  getGitlabMergeRequestDetails,
+  requestGitlabMergeRequestRebase,
   retryGitlabPipeline,
   validateGitlabProjectAccess,
 } from './gitlab.service.js';
@@ -15,6 +19,24 @@ export interface SourceControlChangeRequest {
   url: string;
   state: string;
   title: string;
+}
+
+export interface SourceControlChangeRequestDetails
+  extends SourceControlChangeRequest {
+  sourceBranch: string;
+  targetBranch: string;
+  sourceHeadSha: string | null;
+  targetHeadSha?: string | null;
+  detailedStatus: string | null;
+  rebaseInProgress: boolean;
+  rebaseError: string | null;
+  version?: number | null;
+}
+
+export interface SourceControlRebaseRequestResult {
+  requested: boolean;
+  inProgress?: boolean;
+  reason?: string;
 }
 
 export async function validateRepositoryAccess(
@@ -59,6 +81,48 @@ export async function createChangeRequest(
         targetBranch,
         title,
         normalizedDescription
+      );
+  }
+}
+
+export function getChangeRequestDetails(
+  access: McpRepositoryAccess,
+  repositoryId: string,
+  mergeRequestUrl: string
+): Promise<SourceControlChangeRequestDetails> {
+  switch (access.provider) {
+    case 'bitbucket_data_center':
+      return getBitbucketPullRequestDetails(
+        access,
+        repositoryId,
+        mergeRequestUrl
+      );
+    case 'gitlab':
+      return getGitlabMergeRequestDetails(
+        access,
+        repositoryId,
+        mergeRequestUrl
+      );
+  }
+}
+
+export function requestChangeRequestRebase(
+  access: McpRepositoryAccess,
+  repositoryId: string,
+  mergeRequestUrl: string
+): Promise<SourceControlRebaseRequestResult> {
+  switch (access.provider) {
+    case 'bitbucket_data_center':
+      return requestBitbucketPullRequestRebase(
+        access,
+        repositoryId,
+        mergeRequestUrl
+      );
+    case 'gitlab':
+      return requestGitlabMergeRequestRebase(
+        access,
+        repositoryId,
+        mergeRequestUrl
       );
   }
 }

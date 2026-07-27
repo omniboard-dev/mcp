@@ -5,6 +5,13 @@ MCP server that exposes Omniboard agentic check runs to coding agents.
 One agentic run consists of one prompt and its tracked progress. Tools identify a
 run with its `runKey`.
 
+## Repository layout
+
+- `lib/` contains the MCP runtime implementation in TypeScript.
+- `test/` contains TypeScript integration tests.
+- `tooling/` contains repository and release chores only.
+- `dist/` contains generated runtime output.
+
 ## Environment
 
 `OMNIBOARD_API_KEY_MCP` is required and should be passed through the MCP client
@@ -218,6 +225,27 @@ signed workspace state.
 An optional repository URL is accepted only when it identifies a registered
 repository URL for the matched Omniboard project.
 
+When a previously green change request becomes stale, preparation uses the
+provider-refreshed detailed merge status as the recovery trigger. A provider
+`need_rebase` state first requests the provider-native rebase and returns
+`wait`; the external coordinator should prepare the project again after the
+provider finishes. If native rebase is unavailable or the change request has
+actual conflicts, MCP fetches the authoritative source and target branches,
+starts a local rebase in the signed runner workspace, reports the project as
+`blocked`, and returns the exact conflict files and resolution instructions.
+
+The coding agent resolves only those files, stages them, and calls finalization;
+it must not commit, rebase, or push manually. A multi-commit rebase can expose
+another conflict set, in which case finalization returns `completed: false` and
+the caller repeats the resolution/finalization step. Once clean, MCP refetches
+both branches, retries against a newly advanced target up to a bounded limit,
+and pushes the rebased source with `force-with-lease` bound to the source SHA
+that recovery started from. If the source branch advanced concurrently, no push
+is attempted; the retained workspace is reset to that remote source and must be
+prepared again. Recovery phase, attempt, target SHA, and conflict files use the
+existing authenticated workspace state and progress metadata, so no separate
+database lifecycle state is required.
+
 #### `omniboard_runner_finalize_agentic_run_workspace`
 
 Finalizes a prepared workspace after the connected coding agent has applied and
@@ -231,6 +259,12 @@ the same continuation decision used by preparation and local execution. It also
 verifies that the refreshed branch and repository still match the signed
 workspace state. A `wait` or `stop` decision aborts finalization before Git
 or provider state is changed.
+
+Callers must inspect the returned `completed` field. Normal finalization and a
+finished recovery return `completed: true`. Unresolved or newly surfaced rebase
+conflicts return `completed: false`, `conflictFiles`, and updated instructions
+without pushing. A successful recovery reports `pushed`, clears its signed
+recovery state, and asks Omniboard to refresh provider state immediately.
 
 The prepared commit message is used by default. The caller may override it and
 may also supply the merge request title, description, and Git author identity.

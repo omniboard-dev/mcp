@@ -271,6 +271,7 @@ export type AgenticRunContinuationReason =
   | 'active_work'
   | 'actionable_merge_block'
   | 'actionable_review_feedback'
+  | 'automatic_rebase_requested'
   | 'application_pipeline_failure'
   | 'change_completed'
   | 'change_dismissed'
@@ -389,6 +390,19 @@ export interface RunnerWorkspaceState {
   commitSha?: string;
   provider: McpRepositoryAccess['provider'];
   apiBaseUrl: string;
+  recovery?: RunnerWorkspaceRebaseRecovery;
+}
+
+export interface RunnerWorkspaceRebaseRecovery {
+  kind: 'rebase';
+  phase: 'conflicts' | 'ready_to_push';
+  mergeRequestUrl: string;
+  sourceBranch: string;
+  targetBranch: string;
+  sourceHeadSha: string;
+  targetHeadSha: string;
+  attempt: number;
+  conflictFiles: string[];
 }
 
 export interface RunnerWorkspacePrepareResult {
@@ -404,9 +418,10 @@ export interface RunnerWorkspacePrepareResult {
 }
 
 export interface RunnerWorkspaceFinalizeResult {
+  completed: boolean;
   workspace: RunnerWorkspaceState;
-  commitSha: string;
-  mergeRequest: {
+  commitSha?: string;
+  mergeRequest?: {
     id?: number;
     iid?: number;
     url: string;
@@ -414,4 +429,7 @@ export interface RunnerWorkspaceFinalizeResult {
     title: string;
   };
   progressReports: AgenticRunProgressReportResult[];
+  conflictFiles?: string[];
+  instructions?: string[];
+  error?: string;
 }

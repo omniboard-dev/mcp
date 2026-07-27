@@ -14,13 +14,14 @@
     "dev": "node --loader ts-node/esm lib/index.ts",
     "build": "tsc",
     "watch": "tsc --watch",
-    "format:test": "prettier lib/**/*.{ts,json} tooling/**/*.js package.json tsconfig.json",
-    "format:write": "prettier lib/**/*.{ts,json} tooling/**/*.js package.json tsconfig.json --write",
+    "format:test": "prettier \"lib/**/*.{ts,json}\" \"test/**/*.ts\" \"tooling/**/*.js\" package.json tsconfig.json tsconfig.test.json --check",
+    "format:write": "prettier \"lib/**/*.{ts,json}\" \"test/**/*.ts\" \"tooling/**/*.js\" package.json tsconfig.json tsconfig.test.json --write",
     "sync:dist-version": "node tooling/sync-dist-version.js",
     "release": "npm run format:write && npm run build && standard-version -a && npm run sync:dist-version && git push --follow-tags origin main && npm publish --access public",
-    "test:runner": "npm run build && node tooling/runner-workspace.integration.js",
-    "test:tools": "npm run build && node tooling/mcp-tools.integration.js",
-    "test": "npm run test:tools && npm run test:runner"
+    "test:runner": "npm run build && ts-node-esm --project tsconfig.test.json test/integration/runner-workspace.integration.ts",
+    "test:tools": "npm run build && ts-node-esm --project tsconfig.test.json test/integration/mcp-tools.integration.ts",
+    "test": "npm run test:typecheck && npm run test:tools && npm run test:runner",
+    "test:typecheck": "tsc -p tsconfig.test.json"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.17.4",
