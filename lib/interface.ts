@@ -171,6 +171,23 @@ export interface AgenticRunMatchedProjectsResponse {
   total: number;
 }
 
+export type AgenticRunProjectListView = 'full' | 'summary';
+
+export interface AgenticRunMatchedProjectsListResponse
+  extends Omit<AgenticRunMatchedProjectsResponse, 'check'> {
+  check: Omit<McpApiCheck, 'agenticRuns' | 'prompt'> & {
+    agenticRuns?: McpApiCheck['agenticRuns'];
+    prompt?: McpApiCheck['prompt'];
+  };
+  unfilteredTotal: number;
+  returned: number;
+  offset: number;
+  limit: number | null;
+  hasMore: boolean;
+  view: AgenticRunProjectListView;
+  statuses: AgenticRunProgressStatus[];
+}
+
 export interface AgenticRunSummary {
   runKey: string;
   checkName: string;

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import { getAgenticRun } from '../../services/agentic-runs.service.js';
+import { agenticRunOutputSchema } from '../output-schemas.js';
 import { McpToolDefinition } from '../shared.js';
 
 export const getAgenticRunTool: McpToolDefinition = {
@@ -10,5 +11,6 @@ export const getAgenticRunTool: McpToolDefinition = {
   inputSchema: {
     runKey: z.string().min(1),
   },
+  outputSchema: agenticRunOutputSchema,
   handler: ({ runKey }) => getAgenticRun(runKey),
 };

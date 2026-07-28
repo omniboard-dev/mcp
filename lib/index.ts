@@ -9,6 +9,7 @@ import { getAgenticRunTool } from './mcp/tools/get-agentic-run.tool.js';
 import { listAgenticRunsTool } from './mcp/tools/list-agentic-runs.tool.js';
 import { listRunnerAgenticRunsTool } from './mcp/tools/list-runner-agentic-runs.tool.js';
 import { prepareAgenticRunWorkspaceTool } from './mcp/tools/prepare-agentic-run-workspace.tool.js';
+import { prepareNextAgenticRunProjectsTool } from './mcp/tools/prepare-next-agentic-run-projects.tool.js';
 import { listAgenticRunProjectsTool } from './mcp/tools/list-agentic-run-projects.tool.js';
 import { reportAgenticRunProgressTool } from './mcp/tools/report-agentic-run-progress.tool.js';
 import { reportRunnerAgenticRunProgressTool } from './mcp/tools/report-runner-agentic-run-progress.tool.js';
@@ -22,6 +23,7 @@ const server = new McpServer({
 registerTool(server, listAgenticRunsTool);
 registerTool(server, listAgenticRunProjectsTool);
 registerTool(server, listRunnerAgenticRunsTool);
+registerTool(server, prepareNextAgenticRunProjectsTool);
 registerTool(server, prepareAgenticRunWorkspaceTool);
 registerTool(server, finalizeAgenticRunWorkspaceTool);
 registerTool(server, reportRunnerAgenticRunProgressTool);

@@ -5,6 +5,7 @@ import {
   AGENTIC_RUN_RESOLUTION_VALUES,
 } from '../../interface.js';
 import { reportRunnerAgenticRunProgress } from '../../services/agentic-runs.service.js';
+import { progressReportOutputSchema } from '../output-schemas.js';
 import { McpToolDefinition } from '../shared.js';
 
 export const reportRunnerAgenticRunProgressTool: McpToolDefinition = {
@@ -39,6 +40,7 @@ export const reportRunnerAgenticRunProgressTool: McpToolDefinition = {
     verification: z.record(z.unknown()).nullable().optional(),
     metadata: z.record(z.unknown()).nullable().optional(),
   },
+  outputSchema: progressReportOutputSchema,
   handler: ({ runKey, projectName, ...progress }) =>
     reportRunnerAgenticRunProgress(runKey, projectName, progress),
 };

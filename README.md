@@ -164,16 +164,20 @@ local state is never used as recovery state.
 
 1. Call `omniboard_runner_list_agentic_runs` to select an active run unless
    the scheduler already supplies a run key.
-2. Call `omniboard_runner_list_agentic_run_projects` for the selected run.
-3. Select a project and call
+2. For manual selection, call `omniboard_runner_list_agentic_run_projects` for
+   the selected run. Use status filters, pagination, and `view: "summary"` for
+   compact discovery.
+3. Select one project and call
    `omniboard_runner_prepare_agentic_run_workspace`. Preparation refreshes
    only that run and project against its Git provider before deciding whether
-   work should continue.
+   work should continue. For batch selection, call
+   `omniboard_runner_prepare_next_agentic_run_projects` instead; it scans and
+   prepares leased workspaces until its requested limit is reached.
 4. Give the returned prompt, result context, and workspace path to the connected
    coding agent.
 5. Run the relevant tests, lint, or build commands inside that workspace.
-6. Call `omniboard_runner_finalize_agentic_run_workspace` with the commit and
-   merge request wording.
+6. Call `omniboard_runner_finalize_agentic_run_workspace` separately for each
+   prepared workspace, with the commit and merge request wording.
 7. Retain the checkout for inspection, or remove it after downstream
    processing completes. A later preparation recreates a missing checkout from
    DB execution state at a new generation.
@@ -199,6 +203,11 @@ mutable remote.
 
 ### Tools
 
+Every tool declares an output schema and returns the same JSON object in both
+MCP `structuredContent` and a JSON text content block. New clients can consume
+and validate `structuredContent` directly. Existing clients that parse the text
+block remain compatible.
+
 #### `omniboard_runner_list_agentic_runs`
 
 Lists every active agentic run available to the MCP key. Use it when an external
@@ -210,6 +219,47 @@ Lists Omniboard projects matching an agentic check or run. Pass `runKey` to
 target one run, or `checkName` to discover matching projects and active runs
 for a check. This operation does not resolve the MCP process working directory
 or report progress.
+
+Pass `statuses` to filter by canonical stored progress status. Pass `offset`
+and `limit` to page the filtered result. `view: "summary"` omits project result
+payloads and expanded run metadata while retaining repository, progress, merge
+request, pipeline, and error details. The response distinguishes filtered
+`total`, API `unfilteredTotal`, page `returned`, and `hasMore`.
+
+Listing is side-effect free with respect to agentic-run and project state: it
+reads stored progress and does not refresh providers, record snapshots, prepare
+workspaces, or report progress. Stored provider details can therefore be stale.
+
+Use the tools in this order:
+
+1. List runs and projects for read-only discovery and candidate selection.
+2. Prepare one selected project, or call the batch preparation tool when ready
+   to acquire work. Preparation refreshes only the selected candidates before
+   deciding whether work can continue.
+3. List again only when an updated stored overview is needed after preparation.
+
+Do not prepare every project merely to refresh discovery data; preparation can
+acquire a lease and create or resume an actionable workspace.
+
+#### `omniboard_runner_prepare_next_agentic_run_projects`
+
+Scans projects for one run and prepares workspaces until the requested `limit`
+is reached. `statuses` defaults to `blocked` and `failed`; callers can provide
+any supported canonical progress statuses. The limit defaults to one and is
+bounded at ten.
+
+Each candidate is refreshed and classified through the normal preparation
+path. Actionable candidates acquire the existing atomic per-project DB
+execution lease. Candidates already being prepared or holding an active
+execution lease in the same MCP process are reported as waiting, and scanning
+continues so concurrent or stale overlapping batch calls do not return the same
+workspace. Other waiting, stopped, and failed candidates are also included while
+scanning continues for an actionable workspace. The response contains counts and
+per-project preparation results, including the prompts and
+workspace paths needed by coding agents.
+
+The operation does not dispatch coding agents or finalize work. Every returned
+workspace must be edited, verified, and finalized individually.
 
 #### `omniboard_runner_prepare_agentic_run_workspace`
 

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import { listAgenticRuns } from '../../services/agentic-runs.service.js';
+import { localAgenticRunsOutputSchema } from '../output-schemas.js';
 import { McpToolDefinition } from '../shared.js';
 
 export const listAgenticRunsTool: McpToolDefinition = {
@@ -10,5 +11,6 @@ export const listAgenticRunsTool: McpToolDefinition = {
   inputSchema: {
     checkName: z.string().min(1).optional(),
   },
+  outputSchema: localAgenticRunsOutputSchema,
   handler: ({ checkName }) => listAgenticRuns(checkName),
 };

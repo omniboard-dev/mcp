@@ -1,16 +1,19 @@
 import {
   AgenticRunContinuationDecision,
+  AgenticRunMatchedProject,
+  AgenticRunMatchedProjectsListResponse,
+  AgenticRunMatchedProjectsResponse,
   AgenticRunPipelineRetryResult,
+  AgenticRunProjectListView,
   AgenticRunProgressReportResult,
   AgenticRunProgressStatus,
   AgenticRunProgressUpsertInput,
-  AgenticRunMatchedProjectsResponse,
   AgenticRunProjectState,
   AgenticRunResolution,
   AgenticRunResponse,
   AgenticRunsResponse,
-  RunnerAgenticRunsResponse,
   AgenticRunSummary,
+  RunnerAgenticRunsResponse,
 } from '../interface.js';
 import * as api from './api.service.js';
 import { getAgenticRunContinuationDecision } from './agentic-run-continuation.service.js';
@@ -45,6 +48,10 @@ export interface ReportAgenticRunProgressOptions {
 export interface ListAgenticRunProjectsOptions {
   checkName?: string;
   runKey?: string;
+  statuses?: AgenticRunProgressStatus[];
+  offset?: number;
+  limit?: number;
+  view?: AgenticRunProjectListView;
 }
 
 export function listRunnerAgenticRuns(): Promise<RunnerAgenticRunsResponse> {
@@ -60,12 +67,133 @@ export async function listAgenticRuns(
 export async function listAgenticRunProjects({
   checkName,
   runKey,
-}: ListAgenticRunProjectsOptions): Promise<AgenticRunMatchedProjectsResponse> {
+  statuses = [],
+  offset = 0,
+  limit,
+  view = 'full',
+}: ListAgenticRunProjectsOptions): Promise<AgenticRunMatchedProjectsListResponse> {
   if (!checkName && !runKey) {
     throw new Error('Either checkName or runKey is required.');
   }
+  assertPagination(offset, limit);
 
-  return api.getAgenticRunMatchedProjects({ checkName, runKey });
+  const response = await api.getAgenticRunMatchedProjects({
+    checkName,
+    runKey,
+  });
+  return createAgenticRunProjectList(response, {
+    statuses,
+    offset,
+    limit,
+    view,
+  });
+}
+
+export function createAgenticRunProjectList(
+  response: AgenticRunMatchedProjectsResponse,
+  {
+    statuses = [],
+    offset = 0,
+    limit,
+    view = 'full',
+  }: Pick<
+    ListAgenticRunProjectsOptions,
+    'statuses' | 'offset' | 'limit' | 'view'
+  > = {}
+): AgenticRunMatchedProjectsListResponse {
+  assertPagination(offset, limit);
+  const selectedStatuses = [...new Set(statuses)];
+  const filteredProjects = selectedStatuses.length
+    ? response.projects.filter(
+        (project) =>
+          project.progress && selectedStatuses.includes(project.progress.status)
+      )
+    : response.projects;
+  const end = limit === undefined ? undefined : offset + limit;
+  const projects = filteredProjects.slice(offset, end);
+
+  return {
+    check: view === 'summary' ? summarizeCheck(response.check) : response.check,
+    run:
+      view === 'summary' && response.run
+        ? summarizeAgenticRun(response.run)
+        : response.run,
+    runs:
+      view === 'summary'
+        ? response.runs.map(summarizeAgenticRun)
+        : response.runs,
+    projects:
+      view === 'summary' ? projects.map(summarizeMatchedProject) : projects,
+    total: filteredProjects.length,
+    unfilteredTotal: response.total,
+    returned: projects.length,
+    offset,
+    limit: limit ?? null,
+    hasMore: offset + projects.length < filteredProjects.length,
+    view,
+    statuses: selectedStatuses,
+  };
+}
+
+function assertPagination(offset: number, limit?: number) {
+  if (!Number.isInteger(offset) || offset < 0) {
+    throw new Error('Project list offset must be a non-negative integer.');
+  }
+  if (limit !== undefined && (!Number.isInteger(limit) || limit < 1)) {
+    throw new Error('Project list limit must be a positive integer.');
+  }
+}
+
+function summarizeCheck(
+  check: AgenticRunMatchedProjectsResponse['check']
+): Omit<AgenticRunMatchedProjectsResponse['check'], 'agenticRuns' | 'prompt'> {
+  const { agenticRuns: _agenticRuns, prompt: _prompt, ...summary } = check;
+  return summary;
+}
+
+function summarizeAgenticRun(run: AgenticRunSummary): AgenticRunSummary {
+  const {
+    check: _check,
+    project: _project,
+    prompt: _prompt,
+    result: _result,
+    raw: _raw,
+    ...summary
+  } = run;
+  return summary;
+}
+
+function summarizeMatchedProject(
+  project: AgenticRunMatchedProject
+): AgenticRunMatchedProject {
+  const progress = project.progress;
+  return {
+    id: project.id,
+    name: project.name,
+    lastAnalysisDate: project.lastAnalysisDate ?? null,
+    updateDate: project.updateDate ?? null,
+    value: project.value ?? null,
+    repositoryUrl: project.repositoryUrl ?? null,
+    repositoryUrls: project.repositoryUrls ?? [],
+    progress: progress
+      ? {
+          status: progress.status,
+          resolution: progress.resolution ?? null,
+          resolutionReason: progress.resolutionReason ?? null,
+          branch: progress.branch ?? null,
+          commitSha: progress.commitSha ?? null,
+          mergeRequestUrl: progress.mergeRequestUrl ?? null,
+          mergeRequestState: progress.mergeRequestState ?? null,
+          mergeRequestDetailedStatus:
+            progress.mergeRequestDetailedStatus ?? null,
+          pipelineStatus: progress.pipelineStatus ?? null,
+          pipelineUrl: progress.pipelineUrl ?? null,
+          pipelineFailureSummary: progress.pipelineFailureSummary ?? null,
+          providerSyncError: progress.providerSyncError ?? null,
+          error: progress.error ?? null,
+        }
+      : null,
+  };
 }
 
 export async function getRunnerAgenticRun(

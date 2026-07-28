@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import { validateAgenticRun } from '../../services/analyzer-validation.service.js';
+import { agenticRunValidationOutputSchema } from '../output-schemas.js';
 import { McpToolDefinition } from '../shared.js';
 
 export const validateAgenticRunTool: McpToolDefinition = {
@@ -10,5 +11,6 @@ export const validateAgenticRunTool: McpToolDefinition = {
   inputSchema: {
     runKey: z.string().min(1),
   },
+  outputSchema: agenticRunValidationOutputSchema,
   handler: ({ runKey }) => validateAgenticRun(runKey),
 };

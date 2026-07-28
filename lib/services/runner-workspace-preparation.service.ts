@@ -88,7 +88,10 @@ export interface PrepareRunnerWorkspaceOptions {
 export function prepareRunnerWorkspace(
   options: PrepareRunnerWorkspaceOptions
 ): Promise<RunnerWorkspacePrepareResult> {
-  const preparationKey = JSON.stringify([options.runKey, options.projectName]);
+  const preparationKey = createPreparationKey(
+    options.runKey,
+    options.projectName
+  );
   const existingPreparation = workspacePreparations.get(preparationKey);
   if (existingPreparation) {
     if (!hasMatchingPreparationOptions(existingPreparation.options, options)) {
@@ -113,6 +116,17 @@ export function prepareRunnerWorkspace(
     result: preparation,
   });
   return preparation;
+}
+
+export function isRunnerWorkspacePreparationInProgress(
+  runKey: string,
+  projectName: string
+) {
+  return workspacePreparations.has(createPreparationKey(runKey, projectName));
+}
+
+function createPreparationKey(runKey: string, projectName: string) {
+  return JSON.stringify([runKey, projectName]);
 }
 
 function hasMatchingPreparationOptions(

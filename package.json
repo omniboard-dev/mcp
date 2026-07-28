@@ -25,7 +25,7 @@
     "test:typecheck": "tsc -p tsconfig.test.json"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.17.4",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "xpath": "0.0.32",
     "xmldom": "^0.6.0",
     "zod": "^3.25.76"

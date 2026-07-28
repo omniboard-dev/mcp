@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import { finalizeRunnerWorkspace } from '../../services/runner-workspace.service.js';
+import { runnerWorkspaceFinalizeOutputSchema } from '../output-schemas.js';
 import { McpToolDefinition } from '../shared.js';
 
 export const finalizeAgenticRunWorkspaceTool: McpToolDefinition = {
@@ -23,5 +24,6 @@ export const finalizeAgenticRunWorkspaceTool: McpToolDefinition = {
     authorName: z.string().min(1).optional(),
     authorEmail: z.string().email().optional(),
   },
+  outputSchema: runnerWorkspaceFinalizeOutputSchema,
   handler: (options) => finalizeRunnerWorkspace(options),
 };

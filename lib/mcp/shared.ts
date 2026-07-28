@@ -5,30 +5,53 @@ export interface McpToolDefinition {
   name: string;
   description: string;
   inputSchema: Record<string, z.ZodTypeAny>;
+  outputSchema: z.ZodTypeAny;
   handler: (args: any) => Promise<unknown> | unknown;
 }
 
 export function registerTool(
   server: McpServer,
-  { name, description, inputSchema, handler }: McpToolDefinition
+  { name, description, inputSchema, outputSchema, handler }: McpToolDefinition
 ) {
-  server.tool(name, description, inputSchema, async (args) => {
-    try {
-      return asJsonContent(await handler(args));
-    } catch (error) {
-      return asErrorContent(error);
+  server.registerTool(
+    name,
+    {
+      description,
+      inputSchema,
+      outputSchema,
+    },
+    async (args) => {
+      try {
+        return createStructuredToolResult(await handler(args));
+      } catch (error) {
+        return asErrorContent(error);
+      }
     }
-  });
+  );
 }
 
-function asJsonContent(data: unknown) {
+export function createStructuredToolResult(data: unknown) {
+  const text = JSON.stringify(data, null, 2);
+  if (text === undefined) {
+    throw new Error('MCP tool result is not JSON serializable.');
+  }
+  const structuredContent = JSON.parse(text);
+  if (
+    !structuredContent ||
+    typeof structuredContent !== 'object' ||
+    Array.isArray(structuredContent)
+  ) {
+    throw new Error('MCP tool result must be a JSON object.');
+  }
+
   return {
     content: [
       {
         type: 'text' as const,
-        text: JSON.stringify(data, null, 2),
+        text,
       },
     ],
+    structuredContent,
   };
 }
 

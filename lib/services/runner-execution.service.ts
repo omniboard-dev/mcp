@@ -144,6 +144,16 @@ export async function releaseRunnerExecution(executionKey: string) {
   }
 }
 
+export function hasActiveRunnerExecutionLease(
+  runKey: string,
+  projectName: string
+) {
+  const executionKey = executionKeysByIdentity.get(
+    executionIdentity(runKey, projectName)
+  );
+  return executionKey ? Boolean(getActiveLease(executionKey)) : false;
+}
+
 export function createRunnerWorkspaceState(
   execution: RunnerExecution,
   localPath: string,
