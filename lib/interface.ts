@@ -248,10 +248,26 @@ export interface AgenticRunProviderPipelineDiagnostic {
   traceExcerpt?: string | null;
 }
 
+export interface AgenticRunProviderSnapshot {
+  provider: McpRepositoryAccess['provider'];
+  repositoryId: string;
+  changeRequestId: string;
+  commitSha?: string | null;
+  mergeRequestUrl: string;
+  mergeRequestState: string;
+  mergeRequestDetailedStatus?: string | null;
+  pipelineStatus?: string | null;
+  pipelineUrl?: string | null;
+  pipelineFailureSummary?: string | null;
+  providerStatusUpdatedAt?: string | null;
+  diagnostics?: AgenticRunProviderPipelineDiagnostic[];
+}
+
 export interface AgenticRunProjectProgress {
   status: AgenticRunProgressStatus;
   resolution?: AgenticRunResolution | null;
   resolutionReason?: string | null;
+  repositoryUrl?: string | null;
   branch?: string | null;
   commitSha?: string | null;
   mergeRequestUrl?: string | null;

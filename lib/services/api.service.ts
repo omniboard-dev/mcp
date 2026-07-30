@@ -7,6 +7,7 @@ import {
   MCP_MATCHED_PROJECTS_ENDPOINT,
   MCP_REPOSITORY_ACCESS_ENDPOINT,
   MCP_RUN_EXECUTIONS_ENDPOINT,
+  MCP_RUN_PROJECT_PROVIDER_SNAPSHOT_ENDPOINT,
   MCP_RUN_PROJECT_STATE_REFRESH_ENDPOINT,
   SETTINGS_ENDPOINT,
 } from '../consts.js';
@@ -14,6 +15,7 @@ import {
   AgenticRunProgressUpsertInput,
   AgenticRunProgressUpsertResponse,
   AgenticRunProjectState,
+  AgenticRunProviderSnapshot,
   AgenticRunResponse,
   AgenticRunsResponse,
   AgenticRunMatchedProjectsResponse,
@@ -176,6 +178,16 @@ export const refreshAgenticRunProjectState = (
   request<AgenticRunProjectState>(MCP_RUN_PROJECT_STATE_REFRESH_ENDPOINT, {
     method: 'POST',
     body: JSON.stringify({ runKey, projectName }),
+  });
+
+export const applyAgenticRunProjectProviderSnapshot = (
+  runKey: string,
+  projectName: string,
+  snapshot: AgenticRunProviderSnapshot
+): Promise<AgenticRunProjectState> =>
+  request<AgenticRunProjectState>(MCP_RUN_PROJECT_PROVIDER_SNAPSHOT_ENDPOINT, {
+    method: 'POST',
+    body: JSON.stringify({ runKey, projectName, ...snapshot }),
   });
 
 export const getRepositoryAccess = (

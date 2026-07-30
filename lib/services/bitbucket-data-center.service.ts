@@ -12,11 +12,26 @@ interface BitbucketRepositoryResponse {
 interface BitbucketPullRequestResponse {
   id?: number;
   state?: string;
+  updatedDate?: number;
   title?: string;
   version?: number;
   fromRef?: { id?: string; latestCommit?: string | null };
   toRef?: { id?: string; latestCommit?: string | null };
   links?: { self?: Array<{ href?: string }> };
+}
+
+interface BitbucketMergeCheckResponse {
+  canMerge?: boolean;
+  conflicted?: boolean;
+  vetoes?: Array<{ detailedMessage?: string; summaryMessage?: string }>;
+}
+
+interface BitbucketBuildStatus {
+  description?: string;
+  key?: string;
+  name?: string;
+  state?: string;
+  url?: string;
 }
 
 export async function validateBitbucketRepositoryAccess(
@@ -116,7 +131,8 @@ export async function getBitbucketPullRequestDetails(
     apiBaseUrl,
     identity
   )}/pull-requests/${pullRequestId}`;
-  const response = await fetch(endpoint, { headers: bitbucketHeaders(access) });
+  const headers = bitbucketHeaders(access);
+  const response = await fetch(endpoint, { headers });
   if (!response.ok) {
     throw new Error(
       `Bitbucket Data Center pull request lookup failed with ${
@@ -125,6 +141,19 @@ export async function getBitbucketPullRequestDetails(
     );
   }
   const pullRequest = (await response.json()) as BitbucketPullRequestResponse;
+  const commitSha = pullRequest.fromRef?.latestCommit ?? null;
+  const [mergeCheck, builds] = await Promise.all([
+    fetchOptionalJson<BitbucketMergeCheckResponse>(
+      `${endpoint}/merge`,
+      headers
+    ),
+    commitSha
+      ? fetchOptionalJson<{ values?: BitbucketBuildStatus[] }>(
+          createBuildStatusEndpoint(apiBaseUrl, commitSha),
+          headers
+        )
+      : Promise.resolve(null),
+  ]);
   const sourceBranch = normalizeBranchRef(pullRequest.fromRef?.id);
   const targetBranch = normalizeBranchRef(pullRequest.toRef?.id);
   if (!sourceBranch || !targetBranch) {
@@ -132,19 +161,38 @@ export async function getBitbucketPullRequestDetails(
       'Bitbucket Data Center pull request response did not include source and target branches.'
     );
   }
+  const id = pullRequest.id ?? pullRequestId;
+  const url = resolvePullRequestUrl(pullRequest) ?? mergeRequestUrl;
+  const state = pullRequest.state?.toLowerCase() ?? 'open';
+  const detailedStatus = resolveMergeDetailedStatus(state, mergeCheck);
+  const pipeline = summarizeBuildStatuses(builds?.values ?? []);
   return {
-    id: pullRequest.id ?? pullRequestId,
-    url: resolvePullRequestUrl(pullRequest) ?? mergeRequestUrl,
-    state: pullRequest.state?.toLowerCase() ?? 'open',
+    id,
+    url,
+    state,
     title: pullRequest.title ?? '',
     sourceBranch,
     targetBranch,
-    sourceHeadSha: pullRequest.fromRef?.latestCommit ?? null,
+    sourceHeadSha: commitSha,
     targetHeadSha: pullRequest.toRef?.latestCommit ?? null,
     version: pullRequest.version ?? null,
-    detailedStatus: null,
+    detailedStatus,
     rebaseInProgress: false,
     rebaseError: null,
+    providerSnapshot: {
+      provider: 'bitbucket_data_center' as const,
+      repositoryId: identity.id,
+      changeRequestId: String(id),
+      commitSha,
+      mergeRequestUrl: url,
+      mergeRequestState: state,
+      mergeRequestDetailedStatus: detailedStatus,
+      pipelineStatus: pipeline.status,
+      pipelineUrl: pipeline.url,
+      pipelineFailureSummary: pipeline.failureSummary,
+      providerStatusUpdatedAt: normalizeUpdatedDate(pullRequest.updatedDate),
+      diagnostics: pipeline.diagnostics,
+    },
   };
 }
 
@@ -352,6 +400,110 @@ function normalizePullRequest(response: BitbucketPullRequestResponse) {
     state: response.state?.toLowerCase() ?? 'open',
     title: response.title ?? '',
   };
+}
+
+async function fetchOptionalJson<T>(
+  endpoint: string,
+  headers: Record<string, string>
+): Promise<T | null> {
+  const response = await fetch(endpoint, { headers });
+  return response.ok ? ((await response.json()) as T) : null;
+}
+
+function createBuildStatusEndpoint(apiBaseUrl: string, commitSha: string) {
+  const url = new URL(apiBaseUrl);
+  const contextPath = url.pathname
+    .replace(/\/+$/, '')
+    .replace(/\/rest\/api\/(?:latest|1\.0)$/, '');
+  url.pathname = `${contextPath}/rest/build-status/latest/commits/${encodeURIComponent(
+    commitSha
+  )}`;
+  url.searchParams.set('limit', '100');
+  return url.toString();
+}
+
+function resolveMergeDetailedStatus(
+  state: string,
+  mergeCheck: BitbucketMergeCheckResponse | null
+) {
+  if (state === 'merged' || state === 'declined') return state;
+  if (mergeCheck?.conflicted) return 'conflict';
+  if (mergeCheck?.vetoes?.length) return 'blocked';
+  if (mergeCheck?.canMerge) return 'mergeable';
+  return state;
+}
+
+function summarizeBuildStatuses(builds: BitbucketBuildStatus[]) {
+  if (!builds.length) {
+    return {
+      status: null,
+      url: null,
+      failureSummary: null,
+      diagnostics: [],
+    };
+  }
+  const prioritized = [...builds].sort(
+    (a, b) => buildStatusPriority(b.state) - buildStatusPriority(a.state)
+  );
+  const selected = prioritized[0];
+  const status = normalizeBuildStatus(selected.state);
+  const failedBuilds = builds.filter(
+    (build) => normalizeBuildStatus(build.state) === 'failed'
+  );
+  return {
+    status,
+    url: selected.url ?? null,
+    failureSummary: failedBuilds.length
+      ? failedBuilds
+          .map(
+            (build) =>
+              build.name ?? build.key ?? build.description ?? 'Failed build'
+          )
+          .join('; ')
+      : null,
+    diagnostics: failedBuilds.map((build) => ({
+      name: build.name ?? build.key ?? 'Failed build',
+      status: normalizeBuildStatus(build.state),
+      failureReason: build.description ?? null,
+      url: build.url ?? null,
+    })),
+  };
+}
+
+function buildStatusPriority(status?: string) {
+  switch (normalizeBuildStatus(status)) {
+    case 'failed':
+      return 5;
+    case 'canceled':
+      return 4;
+    case 'running':
+      return 3;
+    case 'success':
+      return 2;
+    default:
+      return 1;
+  }
+}
+
+function normalizeBuildStatus(status?: string) {
+  switch (status?.trim().toUpperCase()) {
+    case 'FAILED':
+      return 'failed';
+    case 'CANCELLED':
+      return 'canceled';
+    case 'INPROGRESS':
+      return 'running';
+    case 'SUCCESSFUL':
+      return 'success';
+    default:
+      return 'unknown';
+  }
+}
+
+function normalizeUpdatedDate(value?: number) {
+  return typeof value === 'number' && Number.isFinite(value)
+    ? new Date(value).toISOString()
+    : null;
 }
 
 function resolveBitbucketApiBaseUrl(value: string) {

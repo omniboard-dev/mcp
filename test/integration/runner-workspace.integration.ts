@@ -28,6 +28,7 @@ const repositoryAccessRequests: string[] = [];
 const state: Record<string, any> = {
   projectRepositoryUrls: [registeredFileRepositoryUrl],
   repositoryAccessHost: 'gitlab.example.com',
+  repositoryAccessProvider: 'gitlab',
   expectedProjectPath: normalizeProjectPath(remotePath),
   includeProjectPath: true,
   mergeRequestPayload: undefined,
@@ -35,6 +36,9 @@ const state: Record<string, any> = {
   bitbucketAuthorization: undefined,
   bitbucketPullRequestCreateCount: 0,
   bitbucketPullRequestLookupCount: 0,
+  bitbucketPullRequestLookupFailures: 0,
+  bitbucketProviderSnapshotCount: 0,
+  bitbucketPullRequestState: 'OPEN',
   mergeRequestCreateCount: 0,
   mergeRequestLookupCount: 0,
   mergeRequestDetailedStatus: 'mergeable',
@@ -305,6 +309,70 @@ try {
       });
     }
 
+    if (
+      request.method === 'POST' &&
+      url.pathname === '/mcp/run-project-state/provider-snapshot'
+    ) {
+      state.bitbucketProviderSnapshotCount += 1;
+      assert.equal(body.runKey, 'run-uxf');
+      assert.equal(body.projectName, 'project-a');
+      assert.equal(body.provider, 'bitbucket_data_center');
+      assert.equal(body.repositoryId, 'OB/project-a');
+      assert.equal(body.changeRequestId, '17');
+      state.providerSyncSuccess = true;
+      state.projectMergeRequestUrl = body.mergeRequestUrl;
+      state.projectMergeRequestState = body.mergeRequestState;
+      state.projectMergeRequestDetailedStatus = body.mergeRequestDetailedStatus;
+      state.projectPipelineStatus = body.pipelineStatus;
+      state.projectPipelineUrl = body.pipelineUrl;
+      if (body.mergeRequestState === 'merged') {
+        state.projectProgressStatus = 'done';
+        state.projectProgressResolution = 'merged';
+      } else if (body.mergeRequestState === 'declined') {
+        state.projectProgressStatus = 'failed';
+        state.projectProgressResolution = null;
+      } else {
+        state.projectProgressStatus = 'mr_created';
+        state.projectProgressResolution = null;
+      }
+      return send(response, {
+        run: {
+          runKey: 'run-uxf',
+          checkName: 'uxf-icon-registry',
+          prompt: 'Update the icon registry.',
+          branchName: 'agentic/run-uxf',
+          commitMessage: 'fix(OB-123): update icon registry',
+          status: 'active',
+          isActive: true,
+        },
+        project: {
+          id: 1,
+          name: 'project-a',
+          currentlyMatchesCheck: state.projectMatchesCheck,
+          repositoryUrl: state.projectRepositoryUrls[0],
+          repositoryUrls: state.projectRepositoryUrls,
+        },
+        progress: {
+          status: state.projectProgressStatus,
+          resolution: state.projectProgressResolution,
+          branch: state.projectProgressBranch,
+          commitSha: body.commitSha,
+          mergeRequestUrl: state.projectMergeRequestUrl,
+          mergeRequestState: state.projectMergeRequestState,
+          mergeRequestDetailedStatus: state.projectMergeRequestDetailedStatus,
+          pipelineStatus: state.projectPipelineStatus,
+          pipelineUrl: state.projectPipelineUrl,
+          pipelineFailureSummary: body.pipelineFailureSummary,
+        },
+        providerSync: {
+          attempted: true,
+          success: true,
+          error: null,
+          diagnostics: body.diagnostics ?? [],
+        },
+      });
+    }
+
     if (request.method === 'GET' && url.pathname === '/mcp/matched-projects') {
       state.matchedProjectsLookupCount += 1;
       return send(response, {
@@ -368,6 +436,17 @@ try {
     ) {
       assert(state.projectRepositoryUrls.includes(body.repositoryUrl));
       repositoryAccessRequests.push(body.repositoryUrl);
+      if (state.repositoryAccessProvider === 'bitbucket_data_center') {
+        return send(response, {
+          provider: 'bitbucket_data_center',
+          host: 'bitbucket.example.com',
+          apiBaseUrl: `http://127.0.0.1:${getServerPort(
+            server
+          )}/bitbucket/rest/api/latest`,
+          username: 'omniboard-service',
+          token: 'bitbucket-token',
+        });
+      }
       return send(response, {
         provider: 'gitlab',
         host: state.repositoryAccessHost,
@@ -396,6 +475,53 @@ try {
         archived: false,
         state: 'AVAILABLE',
       });
+    }
+
+    if (
+      request.method === 'GET' &&
+      url.pathname ===
+        '/bitbucket/rest/api/latest/projects/OB/repos/project-a/pull-requests/17'
+    ) {
+      if (state.bitbucketPullRequestLookupFailures > 0) {
+        state.bitbucketPullRequestLookupFailures -= 1;
+        response.statusCode = 503;
+        return send(response, { message: 'Temporary provider failure' });
+      }
+      return send(response, {
+        id: 17,
+        state: state.bitbucketPullRequestState,
+        title: 'Fix UXF icon registry',
+        updatedDate: Date.parse('2026-07-28T15:00:00.000Z'),
+        fromRef: {
+          id: 'refs/heads/agentic/run-uxf',
+          latestCommit: 'bitbucket-head',
+        },
+        toRef: { id: 'refs/heads/main', latestCommit: 'main-head' },
+        links: {
+          self: [
+            {
+              href: 'https://bitbucket.example.com/projects/OB/repos/project-a/pull-requests/17',
+            },
+          ],
+        },
+      });
+    }
+
+    if (
+      request.method === 'GET' &&
+      url.pathname ===
+        '/bitbucket/rest/api/latest/projects/OB/repos/project-a/pull-requests/17/merge'
+    ) {
+      return send(response, { canMerge: true, conflicted: false, vetoes: [] });
+    }
+
+    if (
+      request.method === 'GET' &&
+      url.pathname ===
+        '/bitbucket/rest/build-status/latest/commits/bitbucket-head'
+    ) {
+      assert.equal(url.searchParams.get('limit'), '100');
+      return send(response, { values: [] });
     }
 
     if (

@@ -123,6 +123,65 @@ export async function runPostMergeRequestContinuationIntegration(context: any) {
   assert.equal(state.agenticRunLookupCount, runLookupsBeforeProviderWait);
   state.providerSyncSuccess = true;
 
+  const providerSnapshotsBeforeBitbucketFallback =
+    state.bitbucketProviderSnapshotCount;
+  state.repositoryAccessProvider = 'bitbucket_data_center';
+  state.projectRepositoryUrls = [
+    'https://bitbucket.example.com/scm/OB/project-a.git',
+  ];
+  state.projectProgressStatus = 'failed';
+  state.projectProgressResolution = null;
+  state.projectMergeRequestUrl =
+    'https://bitbucket.example.com/projects/OB/repos/project-a/pull-requests/17';
+  state.projectMergeRequestState = 'open';
+  state.projectMergeRequestDetailedStatus = null;
+  state.bitbucketPullRequestState = 'MERGED';
+  state.providerSyncSuccess = false;
+  state.bitbucketPullRequestLookupFailures = 1;
+  const failedLocalFallbackContinuation = await prepareRunnerWorkspace({
+    runKey: 'run-uxf',
+    projectName: 'project-a',
+  });
+  assert.equal(failedLocalFallbackContinuation.continuation.action, 'wait');
+  assert.equal(
+    failedLocalFallbackContinuation.continuation.reason,
+    'provider_sync_failed'
+  );
+  assert.equal(
+    state.bitbucketProviderSnapshotCount,
+    providerSnapshotsBeforeBitbucketFallback
+  );
+
+  const bitbucketFallbackContinuation = await prepareRunnerWorkspace({
+    runKey: 'run-uxf',
+    projectName: 'project-a',
+  });
+  assert.equal(
+    state.bitbucketProviderSnapshotCount,
+    providerSnapshotsBeforeBitbucketFallback + 1
+  );
+  assert.equal(
+    bitbucketFallbackContinuation.projectState.providerSync.success,
+    true
+  );
+  assert.equal(
+    bitbucketFallbackContinuation.projectState.progress.status,
+    'done'
+  );
+  assert.equal(bitbucketFallbackContinuation.continuation.action, 'stop');
+  assert.equal(
+    bitbucketFallbackContinuation.continuation.reason,
+    'change_merged'
+  );
+  assert.equal(bitbucketFallbackContinuation.workspace, undefined);
+
+  state.repositoryAccessProvider = 'gitlab';
+  state.projectRepositoryUrls = [registeredFileRepositoryUrl];
+  state.projectMergeRequestUrl =
+    'https://gitlab.example.com/group/project/-/merge_requests/3';
+  state.bitbucketPullRequestState = 'OPEN';
+  state.providerSyncSuccess = true;
+
   state.projectProgressStatus = 'future_status';
   state.projectPipelineStatus = null;
   const unsupportedStatusContinuation = await prepareRunnerWorkspace({

@@ -1,4 +1,7 @@
-import { McpRepositoryAccess } from '../interface.js';
+import {
+  AgenticRunProviderSnapshot,
+  McpRepositoryAccess,
+} from '../interface.js';
 import {
   createBitbucketPullRequest,
   getBitbucketPullRequestDetails,
@@ -31,6 +34,7 @@ export interface SourceControlChangeRequestDetails
   rebaseInProgress: boolean;
   rebaseError: string | null;
   version?: number | null;
+  providerSnapshot?: AgenticRunProviderSnapshot;
 }
 
 export interface SourceControlRebaseRequestResult {

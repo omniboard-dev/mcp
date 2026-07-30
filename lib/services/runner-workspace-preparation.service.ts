@@ -138,6 +138,68 @@ function hasMatchingPreparationOptions(
   );
 }
 
+async function refreshRunnerProjectStateLocallyIfNeeded({
+  runKey,
+  projectName,
+  repositoryUrl,
+  projectState,
+}: PrepareRunnerWorkspaceOptions & {
+  projectState: AgenticRunProjectState;
+}): Promise<AgenticRunProjectState> {
+  if (
+    projectState.providerSync.success ||
+    !projectState.progress.mergeRequestUrl
+  ) {
+    return projectState;
+  }
+
+  let providerSnapshot: SourceControlChangeRequestDetails['providerSnapshot'];
+  try {
+    const resolvedRepositoryUrl = resolveProjectRepositoryUrl(
+      projectState.project,
+      repositoryUrl ?? projectState.progress.repositoryUrl ?? undefined
+    );
+    const access = await api.getRepositoryAccess(resolvedRepositoryUrl);
+    if (access.provider !== 'bitbucket_data_center') return projectState;
+
+    const effectiveRepositoryUrl = await getEffectiveRepositoryUrl(
+      resolvedRepositoryUrl,
+      process.cwd()
+    );
+    assertAuthorizedRepositoryUrl(
+      access,
+      resolvedRepositoryUrl,
+      effectiveRepositoryUrl
+    );
+    const repository = await validateRepositoryAccess(
+      access,
+      effectiveRepositoryUrl
+    );
+    const changeRequest = await getChangeRequestDetails(
+      access,
+      repository.repositoryId,
+      projectState.progress.mergeRequestUrl
+    );
+    providerSnapshot = changeRequest.providerSnapshot;
+  } catch {
+    return projectState;
+  }
+  if (!providerSnapshot) return projectState;
+
+  try {
+    return await api.applyAgenticRunProjectProviderSnapshot(
+      runKey,
+      projectName,
+      providerSnapshot
+    );
+  } catch (error) {
+    if (error instanceof api.OmniboardApiError && error.status === 404) {
+      return projectState;
+    }
+    throw error;
+  }
+}
+
 async function prepareRunnerWorkspaceInternal({
   runKey,
   projectName,
@@ -150,10 +212,17 @@ async function prepareRunnerWorkspaceInternal({
   let execution: RunnerExecution | undefined;
 
   try {
-    const projectState = await api.refreshAgenticRunProjectState(
+    let projectState = await api.refreshAgenticRunProjectState(
       runKey,
       projectName
     );
+    projectState = await refreshRunnerProjectStateLocallyIfNeeded({
+      runKey,
+      projectName,
+      repositoryUrl,
+      branch,
+      projectState,
+    });
     const continuation = await resolveAgenticRunContinuation(projectState);
     if (continuation.action !== 'continue') {
       if (continuation.action === 'stop') {
