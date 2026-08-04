@@ -84,6 +84,7 @@ try {
     acquireRunnerExecution,
     checkpointRunnerExecution,
     releaseRunnerExecution,
+    releaseRunnerExecutionByIdentity,
   } = await import('../../dist/services/runner-execution.service.js');
 
   const first = await acquireRunnerExecution(acquireInput('run-transient'));
@@ -104,6 +105,36 @@ try {
   await checkpointRunnerExecution(first, { phase: 'preparing' });
   await releaseRunnerExecution(first.executionKey);
   assert.equal(firstTimer.cleared, true);
+
+  const releasable = await acquireRunnerExecution(
+    acquireInput('run-release-by-identity')
+  );
+  const releasableTimer = timers.at(-1)!;
+  assert.deepEqual(
+    await releaseRunnerExecutionByIdentity(
+      'run-release-by-identity',
+      'project-a'
+    ),
+    {
+      runKey: 'run-release-by-identity',
+      projectName: 'project-a',
+      executionKey: releasable.executionKey,
+      released: true,
+    }
+  );
+  assert.equal(releasableTimer.cleared, true);
+  assert.deepEqual(
+    await releaseRunnerExecutionByIdentity(
+      'run-release-by-identity',
+      'project-a'
+    ),
+    {
+      runKey: 'run-release-by-identity',
+      projectName: 'project-a',
+      executionKey: null,
+      released: false,
+    }
+  );
 
   const rejected = await acquireRunnerExecution(acquireInput('run-rejected'));
   const rejectedTimer = timers.at(-1)!;

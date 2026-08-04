@@ -33,6 +33,7 @@ import {
   createRunnerWorkspaceState,
   reinitializeRunnerExecution,
   releaseRunnerExecution,
+  RunnerExecutionLeaseConflictError,
 } from './runner-execution.service.js';
 import {
   reconcileRunnerWorkspace,
@@ -509,6 +510,9 @@ async function prepareRunnerWorkspaceInternal({
       progressReport,
     };
   } catch (error) {
+    if (error instanceof RunnerExecutionLeaseConflictError) {
+      throw error;
+    }
     let cleanupError: unknown;
     if (execution) {
       try {
@@ -637,6 +641,11 @@ function createWorkspaceInstructions(
       '". The prepared commit message is "' +
       (state.commitMessage ?? defaultRunnerCommitMessage(runKey)) +
       '".',
+    'If you stop without finalizing, call omniboard_runner_release_agentic_run_workspace with runKey "' +
+      runKey +
+      '", and projectName "' +
+      projectName +
+      '" so this workspace does not remain leased.',
   ];
 }
 

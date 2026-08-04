@@ -10,6 +10,8 @@ import {
 import * as api from './api.service.js';
 
 const LEASE_RENEWAL_INTERVAL_MS = 60_000;
+const RUNNER_EXECUTION_LEASE_CONFLICT_MESSAGE =
+  'Runner execution is leased by another MCP process';
 const leaseOwner = `${os.hostname().slice(0, 48)}:${
   process.pid
 }:${randomUUID()}`;
@@ -35,6 +37,13 @@ export interface AcquireRunnerExecutionInput {
   commitMessage?: string | null;
 }
 
+export class RunnerExecutionLeaseConflictError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'RunnerExecutionLeaseConflictError';
+  }
+}
+
 export async function acquireRunnerExecution(
   input: AcquireRunnerExecutionInput
 ): Promise<RunnerExecution> {
@@ -43,11 +52,17 @@ export async function acquireRunnerExecution(
   const currentLease = currentExecutionKey
     ? getActiveLease(currentExecutionKey)
     : undefined;
-  const response = await api.acquireRunnerExecution({
-    ...input,
-    leaseOwner,
-    ...(currentLease ? { leaseToken: currentLease.token } : {}),
-  });
+  const response = await api
+    .acquireRunnerExecution({
+      ...input,
+      leaseOwner,
+      ...(currentLease ? { leaseToken: currentLease.token } : {}),
+    })
+    .catch((error: unknown) => {
+      if (!isRunnerExecutionLeaseConflict(error)) throw error;
+      if (currentExecutionKey) forgetLease(currentExecutionKey);
+      throw new RunnerExecutionLeaseConflictError(error.message);
+    });
   registerLease(
     identity,
     response.execution.executionKey,
@@ -142,6 +157,28 @@ export async function releaseRunnerExecution(executionKey: string) {
   } finally {
     forgetLease(executionKey);
   }
+}
+
+export interface ReleaseRunnerExecutionResult {
+  runKey: string;
+  projectName: string;
+  executionKey: string | null;
+  released: boolean;
+}
+
+export async function releaseRunnerExecutionByIdentity(
+  runKey: string,
+  projectName: string
+): Promise<ReleaseRunnerExecutionResult> {
+  const executionKey = executionKeysByIdentity.get(
+    executionIdentity(runKey, projectName)
+  );
+  if (!executionKey || !getActiveLease(executionKey)) {
+    return { runKey, projectName, executionKey: null, released: false };
+  }
+
+  await releaseRunnerExecution(executionKey);
+  return { runKey, projectName, executionKey, released: true };
 }
 
 export function hasActiveRunnerExecutionLease(
@@ -290,6 +327,16 @@ function isDefinitiveLeaseRejection(error: unknown) {
   return (
     error instanceof api.OmniboardApiError &&
     (error.status === 404 || error.status === 409)
+  );
+}
+
+function isRunnerExecutionLeaseConflict(
+  error: unknown
+): error is api.OmniboardApiError {
+  return (
+    error instanceof api.OmniboardApiError &&
+    error.status === 409 &&
+    error.message.includes(RUNNER_EXECUTION_LEASE_CONFLICT_MESSAGE)
   );
 }
 

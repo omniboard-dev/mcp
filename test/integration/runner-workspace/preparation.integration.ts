@@ -130,6 +130,20 @@ export async function runWorkspacePreparationIntegration(context: any) {
   state.canPush = true;
   progress.length = 0;
 
+  state.runnerExecution = null;
+  state.runnerLeaseToken = 'external-process-lease-token';
+  const progressBeforeLeaseConflict = progress.length;
+  await assert.rejects(
+    prepareRunnerWorkspace({
+      runKey: 'run-uxf',
+      projectName: 'project-a',
+    }),
+    /Runner execution is leased by another MCP process/
+  );
+  assert.equal(progress.length, progressBeforeLeaseConflict);
+  state.runnerExecution = null;
+  state.runnerLeaseToken = null;
+
   state.projectProgressBranch = 'agentic/retry-guard';
   const retryPrepared = await prepareRunnerWorkspace({
     runKey: 'run-uxf',

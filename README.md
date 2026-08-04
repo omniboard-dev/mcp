@@ -32,37 +32,53 @@ Leave it unset in normal runner deployments.
 
 ## Registering the MCP server
 
-The server uses the standard MCP stdio transport. Configure the MCP client to run
-the package with `npx` and pass the MCP key in the server environment.
+The server uses the standard MCP stdio transport. Instantiate it only in projects
+that use Omniboard MCP. Do not add it to a user-level or global configuration:
+coding harnesses may start the server for every project, wasting resources and
+exposing irrelevant tools. Keep the API key in the harness-specific project or
+local configuration and do not commit it.
 
-### Claude Desktop, Cursor, and other JSONC clients
+### Claude Code
 
-```jsonc
+From the relevant project root, add a local-scoped server. See the [Claude Code
+MCP configuration](https://code.claude.com/docs/en/mcp) for scope and management
+options.
+
+```sh
+claude mcp add --env OMNIBOARD_API_KEY_MCP=your-api-key --scope local omniboard -- npx -y @omniboard/mcp
+```
+
+### Cursor
+
+Create `.cursor/mcp.json` in the relevant project. See the [Cursor MCP
+configuration](https://docs.cursor.com/context/model-context-protocol) for
+project and global configuration locations.
+
+```json
 {
   "mcpServers": {
     "omniboard": {
       "command": "npx",
       "args": ["-y", "@omniboard/mcp"],
-      "env": {
-        "OMNIBOARD_API_KEY_MCP": "your-api-key",
-        "OMNIBOARD_API_KEY": "your-api-key" // optional
-      }
+      "env": { "OMNIBOARD_API_KEY_MCP": "your-api-key" }
     }
   }
 }
 ```
 
-### Codex `config.toml`
+### Codex
+
+Create `.codex/config.toml` in the relevant project, not `~/.codex/config.toml`.
+See the [Codex project configuration](https://developers.openai.com/codex/config-basic/)
+and [MCP configuration](https://developers.openai.com/codex/mcp/) documentation.
 
 ```toml
 [mcp_servers.omniboard]
 command = "npx"
 args = ["-y", "@omniboard/mcp"]
-startup_timeout_sec = 30
 
 [mcp_servers.omniboard.env]
 OMNIBOARD_API_KEY_MCP = "your-api-key"
-OMNIBOARD_API_KEY = "your-api-key" # optional
 ```
 
 ## Developer-local mode
@@ -248,6 +264,18 @@ is reached. `statuses` defaults to `blocked` and `failed`; callers can provide
 any supported canonical progress statuses. The limit defaults to one and is
 bounded at ten.
 
+Candidates are ordered smallest-first before preparation. The preferred size is
+the sum of Analyzer-reported lines for source extensions that are likely to be
+edited; relevant file count, total lines, total files, and project name are
+deterministic tie-breakers. The connected coding agent can pass
+`relevantSourceExtensions` after interpreting the run prompt (for example,
+`["json"]` for a registry migration). Without an explicit selection, MCP
+derives extensions from prompt/check text and matched file paths. If no relevant
+extension can be inferred, it ranks by total project size. Projects without
+`projectSize` metadata are retained but ordered after measured projects. The
+response reports the aggregate source selection and each project's selected
+extensions and size ranking so the decision is inspectable.
+
 Each candidate is refreshed and classified through the normal preparation
 path. Actionable candidates acquire the existing atomic per-project DB
 execution lease. Candidates already being prepared or holding an active
@@ -259,7 +287,8 @@ per-project preparation results, including the prompts and
 workspace paths needed by coding agents.
 
 The operation does not dispatch coding agents or finalize work. Every returned
-workspace must be edited, verified, and finalized individually.
+workspace must be edited, verified, and finalized individually, or explicitly
+released when the caller will not finish it.
 
 #### `omniboard_runner_prepare_agentic_run_workspace`
 
@@ -305,6 +334,17 @@ prepared again. Recovery phase, attempt, source and target SHAs, and conflict
 files are checkpointed in DB execution state after every recoverable transition. Another
 MCP process can continue after the previous lease expires by recreating or
 validating the checkout from that checkpoint.
+
+#### `omniboard_runner_release_agentic_run_workspace`
+
+Releases a prepared execution lease owned by the current MCP process when the
+caller will not finalize that workspace. The renewal timer stops immediately;
+the execution record and local workspace remain available for a later runner to
+resume. Calling it again, or calling it from a process that does not own the
+lease, returns `released: false` without changing another process's lease.
+
+Use this tool for every prepared workspace that will not be finalized. It does
+not change agentic-run progress or mark the execution completed or abandoned.
 
 #### `omniboard_runner_finalize_agentic_run_workspace`
 

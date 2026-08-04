@@ -175,6 +175,7 @@ function summarizeMatchedProject(
     value: project.value ?? null,
     repositoryUrl: project.repositoryUrl ?? null,
     repositoryUrls: project.repositoryUrls ?? [],
+    projectSize: project.projectSize ?? null,
     progress: progress
       ? {
           status: progress.status,

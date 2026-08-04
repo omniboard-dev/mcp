@@ -43,6 +43,19 @@ export const projectProgressOutputSchema = z
   })
   .passthrough();
 
+const projectSizeMetricsOutputSchema = z.object({
+  totalFiles: z.number().int().nonnegative(),
+  totalLines: z.number().int().nonnegative(),
+  byExtension: z.record(z.number().int().nonnegative()),
+  linesByExtension: z.record(z.number().int().nonnegative()),
+});
+
+const projectSizeOutputSchema = projectSizeMetricsOutputSchema.extend({
+  breakdownVersion: z.number().int().nonnegative().optional(),
+  source: projectSizeMetricsOutputSchema.optional(),
+  others: projectSizeMetricsOutputSchema.optional(),
+});
+
 export const matchedProjectOutputSchema = z
   .object({
     id: z.number(),
@@ -53,6 +66,7 @@ export const matchedProjectOutputSchema = z
     result: z.unknown().optional(),
     repositoryUrl: nullableString,
     repositoryUrls: z.array(z.string()).optional(),
+    projectSize: projectSizeOutputSchema.nullable().optional(),
     progress: projectProgressOutputSchema.nullable().optional(),
   })
   .passthrough();
@@ -202,6 +216,15 @@ export const agenticRunValidationOutputSchema = z
   })
   .passthrough();
 
+export const runnerWorkspaceReleaseOutputSchema = z
+  .object({
+    runKey: z.string(),
+    projectName: z.string(),
+    executionKey: z.string().nullable(),
+    released: z.boolean(),
+  })
+  .passthrough();
+
 export const batchPreparationOutputSchema = z
   .object({
     runKey: z.string(),
@@ -210,6 +233,16 @@ export const batchPreparationOutputSchema = z
     candidatesTotal: z.number().int().nonnegative(),
     examined: z.number().int().nonnegative(),
     hasMore: z.boolean(),
+    sourceSelection: z.object({
+      extensions: z.array(z.string()),
+      origin: z.enum([
+        'explicit',
+        'prompt_and_results',
+        'total_project_fallback',
+      ]),
+      projectsWithSize: z.number().int().nonnegative(),
+      projectsWithoutSize: z.number().int().nonnegative(),
+    }),
     summary: z.object({
       prepared: z.number().int().nonnegative(),
       waiting: z.number().int().nonnegative(),
@@ -221,6 +254,14 @@ export const batchPreparationOutputSchema = z
         projectName: z.string(),
         initialStatus: z.enum(AGENTIC_RUN_PROGRESS_STATUS_VALUES).nullable(),
         outcome: z.enum(['prepared', 'waiting', 'stopped', 'failed']),
+        sizeRanking: z.object({
+          metadataAvailable: z.boolean(),
+          relevantExtensions: z.array(z.string()),
+          relevantLines: z.number().int().nonnegative().nullable(),
+          relevantFiles: z.number().int().nonnegative().nullable(),
+          totalLines: z.number().int().nonnegative().nullable(),
+          totalFiles: z.number().int().nonnegative().nullable(),
+        }),
         preparation: runnerWorkspacePrepareOutputSchema.optional(),
         reason: z
           .enum(['preparation_in_progress', 'execution_lease_active'])

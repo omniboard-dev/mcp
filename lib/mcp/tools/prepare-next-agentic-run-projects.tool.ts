@@ -8,7 +8,7 @@ import { McpToolDefinition } from '../shared.js';
 export const prepareNextAgenticRunProjectsTool: McpToolDefinition = {
   name: 'omniboard_runner_prepare_next_agentic_run_projects',
   description:
-    'Dedicated runner execution: use stored progress to scan candidates from one run, then refresh each selected candidate against its provider and prepare distinct atomically leased workspaces until the requested limit is reached. Defaults to blocked and failed projects. Candidates already being prepared or holding an active execution lease in this MCP process are reported as waiting while scanning continues. Use the agentic-state side-effect-free list tool for discovery; use this tool when ready to acquire and work on the next projects, then list again only when an updated overview is needed.',
+    'Dedicated runner execution: order candidates smallest-first using Analyzer project-size metadata, prioritizing the source extensions most likely to change, then refresh and prepare distinct atomically leased workspaces until the requested limit is reached. The connected agent should pass relevantSourceExtensions after interpreting the run prompt; when omitted, MCP derives extensions from prompt/check text and matched file paths, then falls back to total project size. Projects without size metadata sort after measured projects. Defaults to blocked and failed projects. Candidates already being prepared, holding an active execution lease in this MCP process, or rejected because another MCP process holds the API lease are reported as waiting while scanning continues. Finalize or explicitly release every returned workspace. Use the agentic-state side-effect-free list tool for discovery; use this tool when ready to acquire and work on the next projects, then list again only when an updated overview is needed.',
   inputSchema: {
     runKey: z.string().min(1),
     statuses: z
@@ -16,12 +16,18 @@ export const prepareNextAgenticRunProjectsTool: McpToolDefinition = {
       .min(1)
       .optional(),
     limit: z.number().int().positive().max(10).optional(),
+    relevantSourceExtensions: z
+      .array(z.string().min(1))
+      .min(1)
+      .max(50)
+      .optional(),
   },
   outputSchema: batchPreparationOutputSchema,
-  handler: ({ runKey, statuses, limit }) =>
+  handler: ({ runKey, statuses, limit, relevantSourceExtensions }) =>
     prepareNextRunnerProjects({
       runKey,
       statuses,
       limit,
+      relevantSourceExtensions,
     }),
 };

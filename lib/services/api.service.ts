@@ -436,6 +436,7 @@ function normalizeMatchedProject(
     result: project.result ?? null,
     repositoryUrl: project.repositoryUrl ?? null,
     repositoryUrls: project.repositoryUrls ?? [],
+    projectSize: project.projectSize ?? null,
     progress: project.progress ?? null,
   };
 }

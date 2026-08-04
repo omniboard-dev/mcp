@@ -646,6 +646,11 @@ export function createRecoveryWorkspaceInstructions(
       '", and localPath "' +
       state.localPath +
       '". Finalization will continue the rebase and may return another set of conflicts to resolve.',
+    'If you stop without finalizing, call omniboard_runner_release_agentic_run_workspace with runKey "' +
+      runKey +
+      '", and projectName "' +
+      projectName +
+      '" so this workspace does not remain leased.',
   ];
 }
 

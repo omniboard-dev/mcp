@@ -68,7 +68,21 @@ export interface McpApiMatchedProject {
   result?: unknown;
   repositoryUrl?: string | null;
   repositoryUrls?: string[];
+  projectSize?: ProjectSize | null;
   progress?: AgenticRunProjectProgress | null;
+}
+
+export interface ProjectSizeMetrics {
+  totalFiles: number;
+  totalLines: number;
+  byExtension: Record<string, number>;
+  linesByExtension: Record<string, number>;
+}
+
+export interface ProjectSize extends ProjectSizeMetrics {
+  breakdownVersion?: number;
+  source?: ProjectSizeMetrics;
+  others?: ProjectSizeMetrics;
 }
 
 export interface McpApiMatchedProjectsResponse {
@@ -160,6 +174,7 @@ export interface AgenticRunMatchedProject {
   result?: unknown;
   repositoryUrl?: string | null;
   repositoryUrls?: string[];
+  projectSize?: ProjectSize | null;
   progress?: AgenticRunProjectProgress | null;
 }
 
