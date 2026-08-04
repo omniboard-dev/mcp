@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.1.23](https://github.com/omniboard-dev/mcp/compare/v0.1.22...v0.1.23) (2026-08-04)
+
+
+### Features
+
+* harden runner preparation and lease lifecycle ([35f2ce0](https://github.com/omniboard-dev/mcp/commit/35f2ce0817e9eb51a742b483ad573909e0201645))
+
 ### [0.1.22](https://github.com/omniboard-dev/mcp/compare/v0.1.21...v0.1.22) (2026-07-30)
 
 
