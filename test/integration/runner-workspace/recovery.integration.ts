@@ -28,10 +28,10 @@ export async function runWorkspaceRecoveryIntegration(context: any) {
   } = context;
 
   const finalized = await finalizeRunnerWorkspace({
-    runKey: 'run-uxf',
+    runKey: 'run-icons',
     projectName: 'project-a',
     localPath: prepared.workspace.localPath,
-    mergeRequestTitle: 'Fix UXF icon registry',
+    mergeRequestTitle: 'Fix icon registry',
     mergeRequestDescription:
       '## Summary\\n- Update the icon registry.\\n\\n## Verification\\n- Tests passed.',
   });
@@ -46,10 +46,10 @@ export async function runWorkspaceRecoveryIntegration(context: any) {
     '## Summary\n- Update the icon registry.\n\n## Verification\n- Tests passed.'
   );
   const retried = await finalizeRunnerWorkspace({
-    runKey: 'run-uxf',
+    runKey: 'run-icons',
     projectName: 'project-a',
     localPath: prepared.workspace.localPath,
-    mergeRequestTitle: 'Fix UXF icon registry',
+    mergeRequestTitle: 'Fix icon registry',
     mergeRequestDescription:
       '## Summary\n- Update the icon registry.\n\n## Verification\n- Tests passed.',
   });
@@ -65,7 +65,7 @@ export async function runWorkspaceRecoveryIntegration(context: any) {
   state.mergeRequestDetailedStatus = 'need_rebase';
   state.mergeRequestRebaseInProgress = false;
   const nativeRebasePreparation = await prepareRunnerWorkspace({
-    runKey: 'run-uxf',
+    runKey: 'run-icons',
     projectName: 'project-a',
   });
   assert.equal(nativeRebasePreparation.continuation.action, 'wait');
@@ -83,7 +83,7 @@ export async function runWorkspaceRecoveryIntegration(context: any) {
   await execFile('git', ['fetch', 'origin'], { cwd: seedPath });
   await execFile(
     'git',
-    ['checkout', '-B', 'agentic/run-uxf', 'origin/agentic/run-uxf'],
+    ['checkout', '-B', 'agentic/run-icons', 'origin/agentic/run-icons'],
     { cwd: seedPath }
   );
   const sourceReadme = await fs.readFile(
@@ -98,7 +98,7 @@ export async function runWorkspaceRecoveryIntegration(context: any) {
   await execFile('git', ['commit', '-m', 'Change feature heading'], {
     cwd: seedPath,
   });
-  await execFile('git', ['push', 'origin', 'agentic/run-uxf'], {
+  await execFile('git', ['push', 'origin', 'agentic/run-icons'], {
     cwd: seedPath,
   });
   await execFile('git', ['checkout', 'main'], { cwd: seedPath });
@@ -120,7 +120,7 @@ export async function runWorkspaceRecoveryIntegration(context: any) {
   await execFile('git', ['push', 'origin', 'main'], { cwd: seedPath });
 
   const sourceHeadBeforeRecovery = (
-    await execFile('git', ['rev-parse', 'refs/heads/agentic/run-uxf'], {
+    await execFile('git', ['rev-parse', 'refs/heads/agentic/run-icons'], {
       cwd: remotePath,
     })
   ).stdout.trim();
@@ -133,14 +133,14 @@ export async function runWorkspaceRecoveryIntegration(context: any) {
   state.recoveryCheckpointFailures = 1;
   await assert.rejects(
     prepareRunnerWorkspace({
-      runKey: 'run-uxf',
+      runKey: 'run-icons',
       projectName: 'project-a',
     }),
     /Forced recovery checkpoint failure/
   );
   assert.equal(state.runnerExecution.recovery, null);
   const conflictPreparation = await prepareRunnerWorkspace({
-    runKey: 'run-uxf',
+    runKey: 'run-icons',
     projectName: 'project-a',
   });
   assert.notEqual(
@@ -181,10 +181,10 @@ export async function runWorkspaceRecoveryIntegration(context: any) {
   for (let attempt = 0; attempt < 6; attempt += 1) {
     await resolveCurrentConflict();
     changedRequestFinalization = await finalizeRunnerWorkspace({
-      runKey: 'run-uxf',
+      runKey: 'run-icons',
       projectName: 'project-a',
       localPath: prepared.workspace.localPath,
-      mergeRequestTitle: 'Fix UXF icon registry',
+      mergeRequestTitle: 'Fix icon registry',
     });
     if (changedRequestFinalization.error) break;
     assert.deepEqual(changedRequestFinalization.conflictFiles, ['README.md']);
@@ -201,7 +201,7 @@ export async function runWorkspaceRecoveryIntegration(context: any) {
   );
   assert.equal(
     (
-      await execFile('git', ['rev-parse', 'refs/heads/agentic/run-uxf'], {
+      await execFile('git', ['rev-parse', 'refs/heads/agentic/run-icons'], {
         cwd: remotePath,
       })
     ).stdout.trim(),
@@ -210,7 +210,7 @@ export async function runWorkspaceRecoveryIntegration(context: any) {
 
   state.mergeRequestTargetBranch = 'main';
   const restartedConflictPreparation = await prepareRunnerWorkspace({
-    runKey: 'run-uxf',
+    runKey: 'run-icons',
     projectName: 'project-a',
   });
   assert.equal(restartedConflictPreparation.workspace.recovery.attempt, 1);
@@ -229,10 +229,10 @@ export async function runWorkspaceRecoveryIntegration(context: any) {
     }
     try {
       conflictFinalized = await finalizeRunnerWorkspace({
-        runKey: 'run-uxf',
+        runKey: 'run-icons',
         projectName: 'project-a',
         localPath: prepared.workspace.localPath,
-        mergeRequestTitle: 'Fix UXF icon registry',
+        mergeRequestTitle: 'Fix icon registry',
       });
     } catch (error) {
       assert.match(String(error), /lookup failed with 503/);
@@ -240,7 +240,7 @@ export async function runWorkspaceRecoveryIntegration(context: any) {
       needsConflictResolution = false;
       assert.equal(
         (
-          await execFile('git', ['rev-parse', 'refs/heads/agentic/run-uxf'], {
+          await execFile('git', ['rev-parse', 'refs/heads/agentic/run-icons'], {
             cwd: remotePath,
           })
         ).stdout.trim(),
@@ -257,7 +257,7 @@ export async function runWorkspaceRecoveryIntegration(context: any) {
   assert.equal(conflictFinalized.workspace.recovery, undefined);
   await execFile('git', ['fetch', 'origin'], { cwd: seedPath });
   let remoteFeatureHead = (
-    await execFile('git', ['rev-parse', 'origin/agentic/run-uxf'], {
+    await execFile('git', ['rev-parse', 'origin/agentic/run-icons'], {
       cwd: seedPath,
     })
   ).stdout.trim();
@@ -271,7 +271,7 @@ export async function runWorkspaceRecoveryIntegration(context: any) {
   );
 
   const exhaustedPreparation = await prepareRunnerWorkspace({
-    runKey: 'run-uxf',
+    runKey: 'run-icons',
     projectName: 'project-a',
   });
   const exhaustedRecoveryState = exhaustedPreparation.workspace;
@@ -280,7 +280,7 @@ export async function runWorkspaceRecoveryIntegration(context: any) {
     phase: 'ready_to_push',
     mergeRequestUrl:
       'https://gitlab.example.com/group/project/-/merge_requests/3',
-    sourceBranch: 'agentic/run-uxf',
+    sourceBranch: 'agentic/run-icons',
     targetBranch: 'main',
     sourceHeadSha: remoteFeatureHead,
     targetHeadSha: remoteMainHead,
@@ -301,7 +301,7 @@ export async function runWorkspaceRecoveryIntegration(context: any) {
   ).stdout.trim();
 
   const exhaustedFinalization = await finalizeRunnerWorkspace({
-    runKey: 'run-uxf',
+    runKey: 'run-icons',
     projectName: 'project-a',
     localPath: prepared.workspace.localPath,
   });
@@ -318,7 +318,7 @@ export async function runWorkspaceRecoveryIntegration(context: any) {
   );
 
   const restartedExhaustedRecovery = await prepareRunnerWorkspace({
-    runKey: 'run-uxf',
+    runKey: 'run-icons',
     projectName: 'project-a',
   });
   assert.equal(restartedExhaustedRecovery.workspace.recovery.attempt, 1);
@@ -327,7 +327,7 @@ export async function runWorkspaceRecoveryIntegration(context: any) {
     remoteMainHead
   );
   const completedExhaustedRecovery = await finalizeRunnerWorkspace({
-    runKey: 'run-uxf',
+    runKey: 'run-icons',
     projectName: 'project-a',
     localPath: prepared.workspace.localPath,
   });
@@ -335,7 +335,7 @@ export async function runWorkspaceRecoveryIntegration(context: any) {
 
   await execFile('git', ['fetch', 'origin'], { cwd: seedPath });
   remoteFeatureHead = (
-    await execFile('git', ['rev-parse', 'origin/agentic/run-uxf'], {
+    await execFile('git', ['rev-parse', 'origin/agentic/run-icons'], {
       cwd: seedPath,
     })
   ).stdout.trim();

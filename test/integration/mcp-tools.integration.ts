@@ -32,8 +32,8 @@ assert.equal(
 );
 
 const run = {
-  runKey: 'run-uxf',
-  checkName: 'uxf-icon-registry',
+  runKey: 'run-icons',
+  checkName: 'icon-registry',
   prompt: 'Large migration prompt',
   status: 'active',
   isActive: true,
@@ -70,7 +70,7 @@ const projects = [
 const filteredList = createAgenticRunProjectList(
   {
     check: {
-      name: 'uxf-icon-registry',
+      name: 'icon-registry',
       type: 'regex',
       description: null,
       agentic: true,
@@ -103,7 +103,7 @@ assert(!('agenticRuns' in filteredList.check));
 const batchCandidates = createAgenticRunProjectList(
   {
     check: {
-      name: 'uxf-icon-registry',
+      name: 'icon-registry',
       type: 'regex',
       description: null,
       agentic: true,
@@ -573,7 +573,7 @@ assert.deepEqual(crossProcessLeaseBatch.summary, {
 
 const apiResponse = {
   check: {
-    name: 'uxf-icon-registry',
+    name: 'icon-registry',
     type: 'regex',
     description: null,
     agentic: true,

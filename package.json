@@ -26,14 +26,13 @@
     "test:typecheck": "tsc -p tsconfig.test.json"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@xmldom/xmldom": "^0.9.10",
     "xpath": "0.0.32",
-    "xmldom": "^0.6.0",
     "zod": "^3.25.76"
   },
   "devDependencies": {
     "@types/node": "^20.19.11",
-    "@types/xmldom": "^0.1.34",
     "prettier": "^2.8.8",
     "standard-version": "^9.5.0",
     "ts-node": "^10.9.2",
@@ -55,5 +54,8 @@
   "bugs": {
     "url": "https://github.com/omniboard-dev/mcp/issues"
   },
-  "homepage": "https://github.com/omniboard-dev/mcp#readme"
+  "homepage": "https://github.com/omniboard-dev/mcp#readme",
+  "overrides": {
+    "hono": "4.12.34"
+  }
 }

@@ -29,7 +29,7 @@ export async function runAgenticRunIntegration(context: any) {
 
   const baseRun = {
     runKey: 'run-fallback',
-    checkName: 'uxf-icon-registry',
+    checkName: 'icon-registry',
     isActive: true,
   };
   assert.deepEqual(
@@ -108,8 +108,8 @@ export async function runAgenticRunIntegration(context: any) {
   ) =>
     getAgenticRunContinuationDecision({
       run: {
-        runKey: 'run-uxf',
-        checkName: 'uxf-icon-registry',
+        runKey: 'run-icons',
+        checkName: 'icon-registry',
         status: 'active',
         isActive: true,
       },
@@ -181,12 +181,12 @@ export async function runAgenticRunIntegration(context: any) {
   } = await import('../../../dist/services/source-control.service.js');
 
   const insecurePreparation = prepareRunnerWorkspace({
-    runKey: 'run-uxf',
+    runKey: 'run-icons',
     projectName: 'project-a',
   });
   await assert.rejects(
     prepareRunnerWorkspace({
-      runKey: 'run-uxf',
+      runKey: 'run-icons',
       projectName: 'project-a',
       branch: 'agentic/concurrent-override',
     }),
@@ -225,9 +225,9 @@ export async function runAgenticRunIntegration(context: any) {
   const bitbucketPullRequest = await createChangeRequest(
     bitbucketAccess,
     bitbucketRepository.repositoryId,
-    'agentic/run-uxf',
+    'agentic/run-icons',
     'main',
-    'Fix UXF icon registry',
+    'Fix icon registry',
     '## Summary\\n- Automated test change.\\n\\n## Verification\\n- Passed.'
   );
   assert.equal(bitbucketPullRequest.id, 17);
@@ -242,7 +242,7 @@ export async function runAgenticRunIntegration(context: any) {
     )}`
   );
   assert.deepEqual(state.bitbucketPullRequestPayload.fromRef, {
-    id: 'refs/heads/agentic/run-uxf',
+    id: 'refs/heads/agentic/run-icons',
     repository: {
       slug: 'project-a',
       project: { key: 'OB' },
@@ -262,9 +262,9 @@ export async function runAgenticRunIntegration(context: any) {
   const retriedBitbucketPullRequest = await createChangeRequest(
     bitbucketAccess,
     bitbucketRepository.repositoryId,
-    'agentic/run-uxf',
+    'agentic/run-icons',
     'main',
-    'Fix UXF icon registry',
+    'Fix icon registry',
     'Use `\\n` when documenting escaped line breaks.'
   );
   assert.equal(retriedBitbucketPullRequest.id, 17);
@@ -279,7 +279,7 @@ export async function runAgenticRunIntegration(context: any) {
     'Use `\\n` when documenting escaped line breaks.'
   );
 
-  await reportRunnerAgenticRunProgress('run-uxf', 'project-a', {
+  await reportRunnerAgenticRunProgress('run-icons', 'project-a', {
     status: 'done',
     resolution: 'dismissed',
     resolutionReason: 'false_positive',
@@ -299,20 +299,20 @@ export async function runAgenticRunIntegration(context: any) {
   assert.equal('mergeRequestUrl' in callerControlledProgress, false);
 
   await assert.rejects(
-    reportRunnerAgenticRunProgress('run-uxf', 'project-a', {
+    reportRunnerAgenticRunProgress('run-icons', 'project-a', {
       status: 'done',
     }),
     /done agentic run progress report requires a resolution/
   );
   await assert.rejects(
-    reportRunnerAgenticRunProgress('run-uxf', 'project-a', {
+    reportRunnerAgenticRunProgress('run-icons', 'project-a', {
       status: 'in_progress',
       resolution: 'dismissed',
     }),
     /resolution can only be reported with status "done"/
   );
 
-  await reportAgenticRunProgress('run-uxf', { status: 'in_progress' });
+  await reportAgenticRunProgress('run-icons', { status: 'in_progress' });
   assert.equal(progress.at(-1).localPath, root);
   progress.length = 0;
 }

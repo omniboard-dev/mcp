@@ -39,7 +39,7 @@ export async function runPostMergeRequestContinuationIntegration(context: any) {
     'https://gitlab.example.com/group/project/-/merge_requests/3';
   state.projectMergeRequestState = 'opened';
   const failedPipelineContinuation = await prepareRunnerWorkspace({
-    runKey: 'run-uxf',
+    runKey: 'run-icons',
     projectName: 'project-a',
   });
   assert.equal(
@@ -69,7 +69,7 @@ export async function runPostMergeRequestContinuationIntegration(context: any) {
     state.matchedProjectsLookupCount;
   const runLookupsBeforeInfrastructureWait = state.agenticRunLookupCount;
   const infrastructureFailureContinuation = await prepareRunnerWorkspace({
-    runKey: 'run-uxf',
+    runKey: 'run-icons',
     projectName: 'project-a',
   });
   assert.equal(infrastructureFailureContinuation.continuation.action, 'wait');
@@ -107,7 +107,7 @@ export async function runPostMergeRequestContinuationIntegration(context: any) {
   const runLookupsBeforeProviderWait = state.agenticRunLookupCount;
   state.providerSyncSuccess = false;
   const providerFailureContinuation = await prepareRunnerWorkspace({
-    runKey: 'run-uxf',
+    runKey: 'run-icons',
     projectName: 'project-a',
   });
   assert.equal(providerFailureContinuation.continuation.action, 'wait');
@@ -139,7 +139,7 @@ export async function runPostMergeRequestContinuationIntegration(context: any) {
   state.providerSyncSuccess = false;
   state.bitbucketPullRequestLookupFailures = 1;
   const failedLocalFallbackContinuation = await prepareRunnerWorkspace({
-    runKey: 'run-uxf',
+    runKey: 'run-icons',
     projectName: 'project-a',
   });
   assert.equal(failedLocalFallbackContinuation.continuation.action, 'wait');
@@ -153,7 +153,7 @@ export async function runPostMergeRequestContinuationIntegration(context: any) {
   );
 
   const bitbucketFallbackContinuation = await prepareRunnerWorkspace({
-    runKey: 'run-uxf',
+    runKey: 'run-icons',
     projectName: 'project-a',
   });
   assert.equal(
@@ -185,7 +185,7 @@ export async function runPostMergeRequestContinuationIntegration(context: any) {
   state.projectProgressStatus = 'future_status';
   state.projectPipelineStatus = null;
   const unsupportedStatusContinuation = await prepareRunnerWorkspace({
-    runKey: 'run-uxf',
+    runKey: 'run-icons',
     projectName: 'project-a',
   });
   assert.equal(unsupportedStatusContinuation.continuation.action, 'wait');
@@ -206,10 +206,10 @@ export async function runPostMergeRequestContinuationIntegration(context: any) {
   const stateVersionBeforeStoppedFinalize = state.runnerExecution.stateVersion;
   await assert.rejects(
     finalizeRunnerWorkspace({
-      runKey: 'run-uxf',
+      runKey: 'run-icons',
       projectName: 'project-a',
       localPath: prepared.workspace.localPath,
-      mergeRequestTitle: 'Fix UXF icon registry',
+      mergeRequestTitle: 'Fix icon registry',
     }),
     /finalization is not permitted.*"stop".*change_merged/
   );
@@ -230,7 +230,7 @@ export async function runPostMergeRequestContinuationIntegration(context: any) {
   assert.equal(progress.length, progressCountBeforeStoppedFinalize);
 
   const mergedPreparation = await prepareRunnerWorkspace({
-    runKey: 'run-uxf',
+    runKey: 'run-icons',
     projectName: 'project-a',
   });
   assert.equal(mergedPreparation.projectState.progress.status, 'merged');
@@ -246,7 +246,7 @@ export async function runPostMergeRequestContinuationIntegration(context: any) {
   state.projectProgressResolution = 'dismissed';
   await assert.rejects(
     finalizeRunnerWorkspace({
-      runKey: 'run-uxf',
+      runKey: 'run-icons',
       projectName: 'project-a',
       localPath: prepared.workspace.localPath,
     }),
@@ -259,7 +259,7 @@ export async function runPostMergeRequestContinuationIntegration(context: any) {
 
   const progressCountBeforeLocalStop = progress.length;
   const runLookupsBeforeLocalStop = state.agenticRunLookupCount;
-  const localMergedRun = await getAgenticRun('run-uxf');
+  const localMergedRun = await getAgenticRun('run-icons');
   assert.equal(localMergedRun.continuation.action, 'stop');
   assert.deepEqual(
     localMergedRun.agentContext.instructions,
@@ -269,7 +269,7 @@ export async function runPostMergeRequestContinuationIntegration(context: any) {
   assert.equal(state.agenticRunLookupCount, runLookupsBeforeLocalStop);
   assert.equal(progress.length, progressCountBeforeLocalStop);
 
-  const skippedMergedValidation = await validateAgenticRun('run-uxf');
+  const skippedMergedValidation = await validateAgenticRun('run-icons');
   assert.equal(skippedMergedValidation.skipped, true);
   assert.equal(skippedMergedValidation.continuation.action, 'stop');
   assert.equal(skippedMergedValidation.progressReport, undefined);
@@ -278,7 +278,7 @@ export async function runPostMergeRequestContinuationIntegration(context: any) {
   const runLookupCountBeforeNoMatch = state.agenticRunLookupCount;
   const progressCountBeforeNoMatch = progress.length;
   state.projectMatchesCheck = false;
-  const localNoMatchRun = await getAgenticRun('run-uxf');
+  const localNoMatchRun = await getAgenticRun('run-icons');
   assert.equal(localNoMatchRun.continuation.action, 'stop');
   assert.equal(
     localNoMatchRun.continuation.reason,
@@ -297,12 +297,12 @@ export async function runPostMergeRequestContinuationIntegration(context: any) {
   assert.equal(state.mergeRequestCreateCount, 2);
   assert.equal(state.mergeRequestLookupCount, 1);
   await assert.rejects(fs.access(path.join(runnerRoot, 'state')));
-  assert.equal(state.mergeRequestPayload.source_branch, 'agentic/run-uxf');
+  assert.equal(state.mergeRequestPayload.source_branch, 'agentic/run-icons');
   assert.equal(state.mergeRequestPayload.target_branch, 'main');
   assert.equal(progress.at(-1).status, 'in_progress');
   const { stdout } = await execFile(
     'git',
-    ['show-ref', '--verify', 'refs/heads/agentic/run-uxf'],
+    ['show-ref', '--verify', 'refs/heads/agentic/run-icons'],
     { cwd: remotePath }
   );
   assert.match(stdout, /^[a-f0-9]{40}/);

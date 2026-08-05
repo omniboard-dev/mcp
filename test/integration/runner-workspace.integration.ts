@@ -52,7 +52,7 @@ const state: Record<string, any> = {
   canPush: true,
   projectProgressStatus: 'pending',
   projectProgressResolution: null,
-  projectProgressBranch: 'agentic/run-uxf',
+  projectProgressBranch: 'agentic/run-icons',
   projectPipelineStatus: null,
   projectPipelineUrl: null,
   projectPipelineFailureReason: 'script_failure',
@@ -256,14 +256,14 @@ try {
       request.method === 'POST' &&
       url.pathname === '/mcp/run-project-state/refresh'
     ) {
-      assert.equal(body.runKey, 'run-uxf');
+      assert.equal(body.runKey, 'run-icons');
       assert.equal(body.projectName, 'project-a');
       return send(response, {
         run: {
-          runKey: 'run-uxf',
-          checkName: 'uxf-icon-registry',
+          runKey: 'run-icons',
+          checkName: 'icon-registry',
           prompt: 'Update the icon registry.',
-          branchName: 'agentic/run-uxf',
+          branchName: 'agentic/run-icons',
           commitMessage: 'fix(OB-123): update icon registry',
           status: 'active',
           isActive: true,
@@ -314,7 +314,7 @@ try {
       url.pathname === '/mcp/run-project-state/provider-snapshot'
     ) {
       state.bitbucketProviderSnapshotCount += 1;
-      assert.equal(body.runKey, 'run-uxf');
+      assert.equal(body.runKey, 'run-icons');
       assert.equal(body.projectName, 'project-a');
       assert.equal(body.provider, 'bitbucket_data_center');
       assert.equal(body.repositoryId, 'OB/project-a');
@@ -337,10 +337,10 @@ try {
       }
       return send(response, {
         run: {
-          runKey: 'run-uxf',
-          checkName: 'uxf-icon-registry',
+          runKey: 'run-icons',
+          checkName: 'icon-registry',
           prompt: 'Update the icon registry.',
-          branchName: 'agentic/run-uxf',
+          branchName: 'agentic/run-icons',
           commitMessage: 'fix(OB-123): update icon registry',
           status: 'active',
           isActive: true,
@@ -376,18 +376,18 @@ try {
     if (request.method === 'GET' && url.pathname === '/mcp/matched-projects') {
       state.matchedProjectsLookupCount += 1;
       return send(response, {
-        check: { name: 'uxf-icon-registry', type: 'regex', agentic: true },
+        check: { name: 'icon-registry', type: 'regex', agentic: true },
         run: {
-          runKey: 'run-uxf',
-          checkName: 'uxf-icon-registry',
+          runKey: 'run-icons',
+          checkName: 'icon-registry',
           prompt: 'Update the icon registry.',
           status: 'active',
           isActive: true,
         },
         runs: [
           {
-            runKey: 'run-uxf',
-            checkName: 'uxf-icon-registry',
+            runKey: 'run-icons',
+            checkName: 'icon-registry',
             prompt: 'Update the icon registry.',
             status: 'active',
             isActive: true,
@@ -412,16 +412,16 @@ try {
       return send(response, {
         project: { id: 1, name: 'project-a' },
         check: {
-          name: 'uxf-icon-registry',
+          name: 'icon-registry',
           type: 'regex',
           agentic: true,
           prompt: 'Update the icon registry.',
         },
         run: {
-          runKey: 'run-uxf',
-          checkName: 'uxf-icon-registry',
+          runKey: 'run-icons',
+          checkName: 'icon-registry',
           prompt: 'Update the icon registry.',
-          branchName: 'agentic/run-uxf',
+          branchName: 'agentic/run-icons',
           commitMessage: 'fix(OB-123): update icon registry',
           status: 'active',
           isActive: true,
@@ -490,10 +490,10 @@ try {
       return send(response, {
         id: 17,
         state: state.bitbucketPullRequestState,
-        title: 'Fix UXF icon registry',
+        title: 'Fix icon registry',
         updatedDate: Date.parse('2026-07-28T15:00:00.000Z'),
         fromRef: {
-          id: 'refs/heads/agentic/run-uxf',
+          id: 'refs/heads/agentic/run-icons',
           latestCommit: 'bitbucket-head',
         },
         toRef: { id: 'refs/heads/main', latestCommit: 'main-head' },
@@ -637,8 +637,8 @@ try {
         iid: 3,
         web_url: 'https://gitlab.example.com/group/project/-/merge_requests/3',
         state: 'opened',
-        title: 'Fix UXF icon registry',
-        source_branch: 'agentic/run-uxf',
+        title: 'Fix icon registry',
+        source_branch: 'agentic/run-icons',
         target_branch: state.mergeRequestTargetBranch,
         detailed_merge_status: state.mergeRequestDetailedStatus,
         rebase_in_progress: state.mergeRequestRebaseInProgress,
@@ -663,7 +663,7 @@ try {
     ) {
       state.mergeRequestLookupCount += 1;
       assert.equal(url.searchParams.get('state'), 'opened');
-      assert.equal(url.searchParams.get('source_branch'), 'agentic/run-uxf');
+      assert.equal(url.searchParams.get('source_branch'), 'agentic/run-icons');
       assert.equal(url.searchParams.get('target_branch'), 'main');
       return send(response, [
         {
@@ -672,7 +672,7 @@ try {
           web_url:
             'https://gitlab.example.com/group/project/-/merge_requests/3',
           state: 'opened',
-          title: 'Fix UXF icon registry',
+          title: 'Fix icon registry',
         },
       ]);
     }
@@ -782,7 +782,7 @@ function createRunnerExecution(input: any) {
   return {
     executionKey: '11111111-2222-4333-8444-555555555555',
     runKey: input.runKey,
-    checkName: 'uxf-icon-registry',
+    checkName: 'icon-registry',
     projectName: input.projectName,
     repositoryUrl: input.repositoryUrl,
     sourceControlProvider: input.sourceControlProvider,

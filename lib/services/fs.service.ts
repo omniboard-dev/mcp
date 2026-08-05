@@ -1,6 +1,6 @@
 import * as fs from 'node:fs';
 import * as p from 'node:path';
-import { DOMParser } from 'xmldom';
+import { DOMParser } from '@xmldom/xmldom';
 
 const REGEXP_MATCH_NOTHING = /a^/;
 
@@ -84,9 +84,9 @@ export function fileExists(path: string) {
   }
 }
 
-export function readXmlAsDom(path: string) {
+export function readXmlAsDom(path: string): any {
   const buffer = fs.readFileSync(path);
-  return new DOMParser().parseFromString(buffer.toString());
+  return new DOMParser().parseFromString(buffer.toString(), 'text/xml') as any;
 }
 
 export function readFile(path: string) {

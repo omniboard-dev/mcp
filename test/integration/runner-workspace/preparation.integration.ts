@@ -27,7 +27,7 @@ export async function runWorkspacePreparationIntegration(context: any) {
 
   await assert.rejects(
     prepareRunnerWorkspace({
-      runKey: 'run-uxf',
+      runKey: 'run-icons',
       projectName: 'project-a',
       repositoryUrl: 'https://gitlab.example.com/unrelated/project.git',
     }),
@@ -41,7 +41,7 @@ export async function runWorkspacePreparationIntegration(context: any) {
   state.expectedProjectPath = 'group/project';
   await assert.rejects(
     prepareRunnerWorkspace({
-      runKey: 'run-uxf',
+      runKey: 'run-icons',
       projectName: 'project-a',
     }),
     /does not match credential host/
@@ -50,7 +50,7 @@ export async function runWorkspacePreparationIntegration(context: any) {
   state.projectRepositoryUrls = ['http://gitlab.example.com/group/project.git'];
   await assert.rejects(
     prepareRunnerWorkspace({
-      runKey: 'run-uxf',
+      runKey: 'run-icons',
       projectName: 'project-a',
     }),
     /secure HTTPS/
@@ -65,7 +65,7 @@ export async function runWorkspacePreparationIntegration(context: any) {
   state.canPush = false;
   await assert.rejects(
     prepareRunnerWorkspace({
-      runKey: 'run-uxf',
+      runKey: 'run-icons',
       projectName: 'project-a',
       repositoryUrl: 'https://gitlab.example.com/group/project.git',
     }),
@@ -85,7 +85,7 @@ export async function runWorkspacePreparationIntegration(context: any) {
   state.canPush = true;
   await assert.rejects(
     prepareRunnerWorkspace({
-      runKey: 'run-uxf',
+      runKey: 'run-icons',
       projectName: 'project-a',
     }),
     /does not match repository URL project/
@@ -101,7 +101,7 @@ export async function runWorkspacePreparationIntegration(context: any) {
     await fs.symlink(outsideRunnerRoot, path.join(root, '.omniboard'), 'dir');
     await assert.rejects(
       prepareRunnerWorkspace({
-        runKey: 'run-uxf',
+        runKey: 'run-icons',
         projectName: 'project-a',
       }),
       /must be a real directory/
@@ -118,7 +118,7 @@ export async function runWorkspacePreparationIntegration(context: any) {
   state.canPush = true;
   await assert.rejects(
     prepareRunnerWorkspace({
-      runKey: 'run-uxf',
+      runKey: 'run-icons',
       projectName: 'project-a',
     })
   );
@@ -135,7 +135,7 @@ export async function runWorkspacePreparationIntegration(context: any) {
   const progressBeforeLeaseConflict = progress.length;
   await assert.rejects(
     prepareRunnerWorkspace({
-      runKey: 'run-uxf',
+      runKey: 'run-icons',
       projectName: 'project-a',
     }),
     /Runner execution is leased by another MCP process/
@@ -146,7 +146,7 @@ export async function runWorkspacePreparationIntegration(context: any) {
 
   state.projectProgressBranch = 'agentic/retry-guard';
   const retryPrepared = await prepareRunnerWorkspace({
-    runKey: 'run-uxf',
+    runKey: 'run-icons',
     projectName: 'project-a',
     branch: 'agentic/retry-guard',
   });
@@ -168,14 +168,14 @@ export async function runWorkspacePreparationIntegration(context: any) {
   );
   await assert.rejects(
     finalizeRunnerWorkspace({
-      runKey: 'run-uxf',
+      runKey: 'run-icons',
       projectName: 'project-a',
       localPath: retryPrepared.workspace.localPath,
     }),
     /no verified runner commit to resume/
   );
   const retryRecreated = await prepareRunnerWorkspace({
-    runKey: 'run-uxf',
+    runKey: 'run-icons',
     projectName: 'project-a',
     branch: 'agentic/retry-guard',
   });
@@ -199,17 +199,17 @@ export async function runWorkspacePreparationIntegration(context: any) {
   );
   state.runnerExecution = null;
   state.runnerLeaseToken = null;
-  state.projectProgressBranch = 'agentic/run-uxf';
+  state.projectProgressBranch = 'agentic/run-icons';
   progress.length = 0;
 
   await fs.writeFile(path.join(runnerRoot, '.gitignore'), 'custom/\n');
 
   let prepared = await prepareRunnerWorkspace({
-    runKey: 'run-uxf',
+    runKey: 'run-icons',
     projectName: 'project-a',
     repositoryUrl: pathToFileUrl(remotePath).replace(/\.git$/, ''),
   });
-  assert.equal(prepared.workspace.branch, 'agentic/run-uxf');
+  assert.equal(prepared.workspace.branch, 'agentic/run-icons');
   assert.equal(
     prepared.workspace.commitMessage,
     'fix(OB-123): update icon registry'
@@ -220,7 +220,7 @@ export async function runWorkspacePreparationIntegration(context: any) {
   assert.equal(prepared.prompt, 'Update the icon registry.');
   assert.equal(progress.at(-1).localPath, prepared.workspace.localPath);
   const preparedAgain = await prepareRunnerWorkspace({
-    runKey: 'run-uxf',
+    runKey: 'run-icons',
     projectName: 'project-a',
   });
   assert.equal(preparedAgain.workspace.localPath, prepared.workspace.localPath);
@@ -228,7 +228,7 @@ export async function runWorkspacePreparationIntegration(context: any) {
   const originalGeneration = prepared.workspace.generation;
   await fs.rm(originalWorkspacePath, { recursive: true, force: true });
   const recreated = await prepareRunnerWorkspace({
-    runKey: 'run-uxf',
+    runKey: 'run-icons',
     projectName: 'project-a',
   });
   assert.notEqual(recreated.workspace.localPath, originalWorkspacePath);
@@ -238,7 +238,7 @@ export async function runWorkspacePreparationIntegration(context: any) {
   const progressCountBeforeBranchMismatch = progress.length;
   await assert.rejects(
     prepareRunnerWorkspace({
-      runKey: 'run-uxf',
+      runKey: 'run-icons',
       projectName: 'project-a',
       branch: 'agentic/other-branch',
     }),
@@ -273,10 +273,10 @@ export async function runWorkspacePreparationIntegration(context: any) {
   });
   await assert.rejects(
     finalizeRunnerWorkspace({
-      runKey: 'run-uxf',
+      runKey: 'run-icons',
       projectName: 'project-a',
       localPath: prepared.workspace.localPath,
-      mergeRequestTitle: 'Fix UXF icon registry',
+      mergeRequestTitle: 'Fix icon registry',
     }),
     /Git worktree .* is outside runner workspace/
   );
@@ -350,24 +350,24 @@ export async function runWorkspacePreparationIntegration(context: any) {
   state.projectProgressBranch = 'agentic/reassigned';
   await assert.rejects(
     finalizeRunnerWorkspace({
-      runKey: 'run-uxf',
+      runKey: 'run-icons',
       projectName: 'project-a',
       localPath: prepared.workspace.localPath,
-      mergeRequestTitle: 'Fix UXF icon registry',
+      mergeRequestTitle: 'Fix icon registry',
     }),
     /execution identity does not match/i
   );
-  state.projectProgressBranch = 'agentic/run-uxf';
+  state.projectProgressBranch = 'agentic/run-icons';
 
   state.projectRepositoryUrls = [
     pathToFileUrl(path.join(root, 'group', 'replacement.git')),
   ];
   await assert.rejects(
     finalizeRunnerWorkspace({
-      runKey: 'run-uxf',
+      runKey: 'run-icons',
       projectName: 'project-a',
       localPath: prepared.workspace.localPath,
-      mergeRequestTitle: 'Fix UXF icon registry',
+      mergeRequestTitle: 'Fix icon registry',
     }),
     /project repository does not match the runner workspace repository/
   );
@@ -378,10 +378,10 @@ export async function runWorkspacePreparationIntegration(context: any) {
   state.expectedProjectPath = 'other/project';
   await assert.rejects(
     finalizeRunnerWorkspace({
-      runKey: 'run-uxf',
+      runKey: 'run-icons',
       projectName: 'project-a',
       localPath: prepared.workspace.localPath,
-      mergeRequestTitle: 'Fix UXF icon registry',
+      mergeRequestTitle: 'Fix icon registry',
     }),
     /execution identity does not match/i
   );
