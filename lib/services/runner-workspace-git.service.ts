@@ -120,9 +120,7 @@ function reconciliationError(message: string, cause: unknown) {
 export async function createRunnerCommit(
   state: RunnerWorkspaceState,
   localPath: string,
-  commitMessage: string,
-  authorName: string,
-  authorEmail: string
+  commitMessage: string
 ) {
   const head = await getHeadCommit(localPath);
   if (head.sha !== state.preparedHeadSha) {
@@ -131,12 +129,7 @@ export async function createRunnerCommit(
     );
   }
 
-  const commitSha = await commitAll(
-    commitMessage,
-    localPath,
-    authorName,
-    authorEmail
-  );
+  const commitSha = await commitAll(commitMessage, localPath);
   state.commitSha = commitSha;
   await writeRunnerState(state);
   return commitSha;

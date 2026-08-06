@@ -21,8 +21,6 @@ export const finalizeAgenticRunWorkspaceTool: McpToolDefinition = {
         'Markdown change-request description. Use real line breaks rather than literal \\n sequences.'
       )
       .optional(),
-    authorName: z.string().min(1).optional(),
-    authorEmail: z.string().email().optional(),
   },
   outputSchema: runnerWorkspaceFinalizeOutputSchema,
   handler: (options) => finalizeRunnerWorkspace(options),

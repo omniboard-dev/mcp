@@ -294,26 +294,10 @@ export async function getWorkingTreeStatus(targetDir: string) {
   return stdout.trim();
 }
 
-export async function commitAll(
-  message: string,
-  targetDir: string,
-  authorName: string,
-  authorEmail: string
-) {
+export async function commitAll(message: string, targetDir: string) {
   await runGit(['-c', 'core.fsmonitor=false', 'add', '--all'], targetDir);
   await runGit(
-    [
-      '-c',
-      `user.name=${authorName}`,
-      '-c',
-      `user.email=${authorEmail}`,
-      '-c',
-      'core.hooksPath=/dev/null',
-      'commit',
-      '--no-verify',
-      '-m',
-      message,
-    ],
+    ['-c', 'core.hooksPath=/dev/null', 'commit', '--no-verify', '-m', message],
     targetDir
   );
   const { stdout } = await runGit(['rev-parse', 'HEAD'], targetDir);

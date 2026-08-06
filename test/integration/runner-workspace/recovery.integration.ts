@@ -37,6 +37,21 @@ export async function runWorkspaceRecoveryIntegration(context: any) {
   });
 
   assert.match(finalized.commitSha, /^[a-f0-9]{40}$/);
+  const commitIdentity = (
+    await execFile(
+      'git',
+      ['show', '-s', '--format=%an%n%ae%n%cn%n%ce', finalized.commitSha],
+      { cwd: prepared.workspace.localPath }
+    )
+  ).stdout
+    .trim()
+    .split('\n');
+  assert.deepEqual(commitIdentity, [
+    'Local Runner User',
+    'local-runner@example.com',
+    'Local Runner User',
+    'local-runner@example.com',
+  ]);
   assert.equal(
     finalized.mergeRequest.url,
     'https://gitlab.example.com/group/project/-/merge_requests/3'

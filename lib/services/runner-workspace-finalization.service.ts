@@ -53,9 +53,6 @@ import {
   resolveRunnerGitValues,
 } from './runner-workspace-values.service.js';
 
-const DEFAULT_AUTHOR_NAME = 'Omniboard Agent';
-const DEFAULT_AUTHOR_EMAIL = 'agent@omniboard.dev';
-
 export interface FinalizeRunnerWorkspaceOptions {
   runKey: string;
   projectName: string;
@@ -63,8 +60,6 @@ export interface FinalizeRunnerWorkspaceOptions {
   commitMessage?: string;
   mergeRequestTitle?: string;
   mergeRequestDescription?: string;
-  authorName?: string;
-  authorEmail?: string;
 }
 
 export async function finalizeRunnerWorkspace({
@@ -74,8 +69,6 @@ export async function finalizeRunnerWorkspace({
   commitMessage,
   mergeRequestTitle,
   mergeRequestDescription,
-  authorName = DEFAULT_AUTHOR_NAME,
-  authorEmail = DEFAULT_AUTHOR_EMAIL,
 }: FinalizeRunnerWorkspaceOptions): Promise<RunnerWorkspaceFinalizeResult> {
   const projectState = await api.refreshAgenticRunProjectState(
     runKey,
@@ -163,13 +156,7 @@ export async function finalizeRunnerWorkspace({
     await assertCurrentRunnerBranch(state, localPath);
     const status = await getWorkingTreeStatus(localPath);
     const commitSha = status
-      ? await createRunnerCommit(
-          state,
-          localPath,
-          resolvedCommitMessage,
-          authorName,
-          authorEmail
-        )
+      ? await createRunnerCommit(state, localPath, resolvedCommitMessage)
       : await resolveExistingRunnerCommit(
           state,
           localPath,

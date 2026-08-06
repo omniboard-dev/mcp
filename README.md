@@ -5,13 +5,6 @@ MCP server that exposes Omniboard agentic check runs to coding agents.
 One agentic run consists of one prompt and its tracked progress. Tools identify a
 run with its `runKey`.
 
-## Repository layout
-
-- `lib/` contains the MCP runtime implementation in TypeScript.
-- `test/` contains TypeScript integration tests.
-- `tooling/` contains repository and release chores only.
-- `dist/` contains generated runtime output.
-
 ## Environment
 
 `OMNIBOARD_API_KEY_MCP` is required and should be passed through the MCP client
@@ -20,15 +13,13 @@ access when required, and report run progress.
 
 ### Optional
 
-`OMNIBOARD_API_URL` overrides the Omniboard API URL. It defaults to
-`https://api.omniboard.dev`.
-
-`OMNIBOARD_API_KEY` enables analyzer validation in developer-local mode. Omit
-it when connected agents should not run `@omniboard/analyzer`.
-
-`OMNIBOARD_MCP_ALLOW_LOCAL_TRANSPORTS=true` permits local `file:`
-repositories and loopback HTTP Git/GitLab endpoints for isolated local tests.
-Leave it unset in normal runner deployments.
+- `OMNIBOARD_API_URL`: overrides the Omniboard API URL. It defaults to
+  `https://api.omniboard.dev`.
+- `OMNIBOARD_API_KEY`: enables analyzer validation in developer-local mode.
+  Omit it when connected agents should not run `@omniboard/analyzer`.
+- `OMNIBOARD_MCP_ALLOW_LOCAL_TRANSPORTS=true`: permits local `file:`
+  repositories and loopback HTTP Git/GitLab endpoints for isolated local tests.
+  Leave it unset in normal runner deployments.
 
 ## Registering the MCP server
 
@@ -89,12 +80,17 @@ project, exposes agentic runs for that project, and reports progress against the
 local workspace.
 
 This mode does not create or manage another checkout. The connected agent owns
-the normal development workflow: inspect the project, edit the current
-workspace, run verification, and use the local progress tools to report
-milestones. Local and dedicated modes use the same provider-refreshed
-continuation decision and agent instructions; they differ only in how the
-working checkout is obtained. Analyzer validation is available only when
-`OMNIBOARD_API_KEY` is configured and the continuation decision permits work.
+the normal development workflow:
+
+1. Inspect the project.
+2. Edit the current workspace.
+3. Run the relevant verification.
+4. Use the local progress tools to report milestones.
+
+Local and dedicated modes use the same provider-refreshed continuation decision
+and agent instructions. They differ only in how the working checkout is
+obtained. Analyzer validation is available only when `OMNIBOARD_API_KEY` is
+configured and the continuation decision permits work.
 
 ### Tools
 
@@ -112,12 +108,25 @@ decision permits work.
 
 #### `omniboard_local_report_agentic_run_progress`
 
-Reports a workflow milestone for one run. Supported milestones include
-`implemented`, `needs_input`, `verified`, `committed`, `pushed`,
-`mr_created`, `done`, `blocked`, and `failed`. A `done` progress report
-includes the resolution `merged` or `dismissed`; dismissed findings can include
-a `resolutionReason` such as `false_positive`. The legacy `merged` status
-remains accepted for backward compatibility.
+Reports a workflow milestone for one run. Supported milestones are:
+
+- `implemented`
+- `needs_input`
+- `verified`
+- `committed`
+- `pushed`
+- `mr_created`
+- `done`
+- `blocked`
+- `failed`
+
+A `done` progress report includes one of these resolutions:
+
+- `merged`
+- `dismissed`, optionally with a `resolutionReason` such as
+  `false_positive`
+
+The legacy `merged` status remains accepted for backward compatibility.
 
 The tool can also report repository, commit, merge request, pipeline,
 verification, error, note, and metadata details. The optional `notes` field accepts
@@ -126,11 +135,19 @@ Markdown; plain text remains valid Markdown.
 #### `omniboard_local_validate_agentic_run`
 
 Validates one run by `runKey`. The server resolves the check name, runs the
-analyzer when `OMNIBOARD_API_KEY` is available, evaluates whether the check
-still matches, and reports either `verified` or `needs_input`.
+analyzer when `OMNIBOARD_API_KEY` is available, and evaluates whether the check
+still matches.
 
-When the analyzer key is absent, validation is skipped and the tool reports
-`implemented`.
+Reported progress statuses are:
+
+- `implemented`: validation started, or it was skipped because
+  `OMNIBOARD_API_KEY` is not configured.
+- `verified`: the check no longer matches.
+- `needs_input`: the check still matches.
+- `failed`: analyzer validation failed.
+
+If the continuation decision does not permit validation, the tool returns
+`skipped: true` without reporting another progress status.
 
 ## Dedicated runner mode
 
@@ -162,19 +179,87 @@ The generated `.gitignore` excludes `workspaces/`. If the file already
 exists, its content is preserved and only the missing runtime entry is added.
 
 Each checkout is created under `workspaces/` at a deterministic path derived
-from the DB execution key and generation. MCP does not write accompanying JSON
-state. Prepared and committed SHAs, branch and repository identity, recovery
-metadata, lifecycle phase, and optimistic state version are stored by the
-Omniboard API. Repository credentials and local filesystem paths are never
-stored in execution state.
+from the DB execution key and generation.
 
-An execution has a short renewable lease. The lease token exists only in MCP
-process memory; the API stores only its hash. DB execution state is
-authoritative; runner checkouts are disposable local working copies. If a
-checkout disappears or no longer matches its DB checkpoint, the next
-preparation increments the DB generation and recreates a fresh checkout at a
-new path from the authoritative repository and execution state. Uncheckpointed
-local state is never used as recovery state.
+Execution state is handled as follows:
+
+- The Omniboard API stores prepared and committed SHAs, branch and repository
+  identity, recovery metadata, lifecycle phase, and optimistic state version.
+- MCP does not write accompanying JSON state.
+- Repository credentials and local filesystem paths are never stored in
+  execution state.
+- The execution has a short renewable lease. Its token exists only in MCP
+  process memory; the API stores only its hash.
+- DB execution state is authoritative, and runner checkouts are disposable
+  local working copies.
+- If a checkout disappears or no longer matches its DB checkpoint, the next
+  preparation increments the generation and creates a fresh checkout.
+- Uncheckpointed local state is never used as recovery state.
+
+### Git commit identity
+
+Finalization resolves Git commit identity in this order:
+
+1. The generated checkout's repository-local `user.name` and `user.email`.
+2. The global Git configuration for the operating-system user that runs MCP.
+
+Generated checkouts do not inherit repository-local Git configuration from the
+automation project that contains `.omniboard/`.
+
+For local use, a global Git identity is normally sufficient:
+
+```sh
+git config --global user.name "Tomas Trajan"
+git config --global user.email "tomas@example.com"
+```
+
+CI jobs commonly start with a clean home directory, so configure the identity
+before starting MCP. Run the configuration as the same user and with the same
+`HOME` as the MCP process:
+
+```sh
+git config --global user.name "Omniboard Automation"
+git config --global user.email "automation@example.com"
+git config --global --get user.name
+git config --global --get user.email
+```
+
+If neither checkout-local nor global identity is available, Git rejects the
+commit and workspace finalization fails. MCP does not accept author-name or
+author-email tool inputs and does not provide a hard-coded fallback identity.
+
+#### GitLab CI
+
+Configure a bot identity in `before_script` before the command that starts MCP:
+
+```yaml
+variables:
+  OMNIBOARD_GIT_USER_NAME: 'Omniboard Automation'
+  OMNIBOARD_GIT_USER_EMAIL: 'automation@example.com'
+
+default:
+  before_script:
+    - git config --global user.name "$OMNIBOARD_GIT_USER_NAME"
+    - git config --global user.email "$OMNIBOARD_GIT_USER_EMAIL"
+```
+
+The values may instead come from protected GitLab CI/CD variables when the
+identity should not be repeated in the pipeline file.
+
+#### GitHub Actions
+
+Add an identity configuration step before the step that starts MCP:
+
+```yaml
+- name: Configure Git identity for Omniboard MCP
+  shell: bash
+  run: |
+    git config --global user.name "Omniboard Automation"
+    git config --global user.email "automation@example.com"
+```
+
+Repository or organization variables can be substituted for the literal values
+when the same automation identity is shared by multiple workflows.
 
 ### Workflow
 
@@ -200,22 +285,26 @@ local state is never used as recovery state.
 
 ### Repository access and safety
 
-Preparation performs a read-only GitLab permission preflight before creating a
-workspace. It verifies project visibility, repository and merge request
-availability, archive state, and effective push and merge request permissions.
-Project policy or branch protection can still change after the preflight.
+MCP applies repository safeguards in this order:
 
-Repository access is retrieved only when a credentialed Git operation is
-required. Repository and GitLab API URLs must use HTTPS by default. Local
-`file:` repositories and loopback HTTP endpoints are rejected unless the
-explicit local-test setting described above is enabled. Credentials are supplied
-through a temporary Git askpass helper and are never embedded in clone URLs,
-written to DB execution state, or returned from MCP tools.
+1. Preparation performs a read-only GitLab permission preflight before creating
+   a workspace. It verifies project visibility, repository and merge request
+   availability, archive state, and effective push and merge request
+   permissions.
+2. MCP retrieves repository access only for credentialed Git operations.
+   Repository and GitLab API URLs must use HTTPS by default. Local `file:`
+   repositories and loopback HTTP endpoints require the explicit local-test
+   setting described above.
+3. MCP supplies credentials through a temporary Git askpass helper. Credentials
+   are never embedded in clone URLs, written to DB execution state, or returned
+   from MCP tools.
+4. Finalization retrieves fresh repository access, validates the effective
+   repository and workspace paths, disables repository-controlled credential
+   helpers and Git hooks, and pushes to the validated repository URL rather than
+   a mutable remote.
 
-Finalization retrieves fresh repository access, validates the effective Git
-repository and workspace paths, disables repository-controlled credential
-helpers and Git hooks, and pushes to the validated repository URL rather than a
-mutable remote.
+Project policy or branch protection can still change after the permission
+preflight.
 
 ### Tools
 
@@ -236,11 +325,20 @@ target one run, or `checkName` to discover matching projects and active runs
 for a check. This operation does not resolve the MCP process working directory
 or report progress.
 
-Pass `statuses` to filter by canonical stored progress status. Pass `offset`
-and `limit` to page the filtered result. `view: "summary"` omits project result
-payloads and expanded run metadata while retaining repository, progress, merge
-request, pipeline, and error details. The response distinguishes filtered
-`total`, API `unfilteredTotal`, page `returned`, and `hasMore`.
+Available query controls are:
+
+- `statuses`: filters by canonical stored progress status.
+- `offset` and `limit`: page the filtered result.
+- `view: "summary"`: omits project result payloads and expanded run metadata
+  while retaining repository, progress, merge request, pipeline, and error
+  details.
+
+Pagination fields are:
+
+- `total`: number of filtered projects.
+- `unfilteredTotal`: total returned by the API before filtering.
+- `returned`: number of projects on the current page.
+- `hasMore`: whether another page is available.
 
 Listing is side-effect free with respect to agentic-run and project state: it
 reads stored progress and does not refresh providers, record snapshots, prepare
@@ -260,31 +358,39 @@ acquire a lease and create or resume an actionable workspace.
 #### `omniboard_runner_prepare_next_agentic_run_projects`
 
 Scans projects for one run and prepares workspaces until the requested `limit`
-is reached. `statuses` defaults to `blocked` and `failed`; callers can provide
-any supported canonical progress statuses. The limit defaults to one and is
-bounded at ten.
+is reached.
 
-Candidates are ordered smallest-first before preparation. The preferred size is
-the sum of Analyzer-reported lines for source extensions that are likely to be
-edited; relevant file count, total lines, total files, and project name are
-deterministic tie-breakers. The connected coding agent can pass
-`relevantSourceExtensions` after interpreting the run prompt (for example,
-`["json"]` for a registry migration). Without an explicit selection, MCP
-derives extensions from prompt/check text and matched file paths. If no relevant
-extension can be inferred, it ranks by total project size. Projects without
-`projectSize` metadata are retained but ordered after measured projects. The
-response reports the aggregate source selection and each project's selected
-extensions and size ranking so the decision is inspectable.
+Batch controls are:
 
-Each candidate is refreshed and classified through the normal preparation
-path. Actionable candidates acquire the existing atomic per-project DB
-execution lease. Candidates already being prepared or holding an active
-execution lease in the same MCP process are reported as waiting, and scanning
-continues so concurrent or stale overlapping batch calls do not return the same
-workspace. Other waiting, stopped, and failed candidates are also included while
-scanning continues for an actionable workspace. The response contains counts and
-per-project preparation results, including the prompts and
-workspace paths needed by coding agents.
+- `statuses`: defaults to `blocked` and `failed`, and accepts any supported
+  canonical progress statuses.
+- `limit`: defaults to one and is bounded at ten.
+- `relevantSourceExtensions`: lets the coding agent identify likely edited
+  source types after interpreting the run prompt, for example `["json"]` for a
+  registry migration.
+
+Candidates are ordered smallest-first:
+
+1. MCP uses explicitly supplied relevant source extensions when available.
+2. Otherwise, it derives extensions from prompt/check text and matched paths.
+3. It prefers the Analyzer-reported line count for the selected extensions.
+4. Relevant file count, total lines, total files, and project name provide
+   deterministic tie-breakers.
+5. If no relevant extension can be inferred, MCP ranks by total project size.
+6. Projects without `projectSize` metadata remain eligible but follow measured
+   projects.
+
+Each candidate is refreshed through the normal preparation path and classified:
+
+- Actionable candidates acquire the atomic per-project DB execution lease and
+  return a prepared workspace.
+- Candidates already being prepared or holding an active lease in the same MCP
+  process are reported as waiting.
+- Other waiting, stopped, and failed candidates remain in the response while
+  scanning continues for actionable work.
+
+The response includes aggregate counts, source selection, and per-project
+results with selected extensions, size ranking, prompts, and workspace paths.
 
 The operation does not dispatch coding agents or finalize work. Every returned
 workspace must be edited, verified, and finalized individually, or explicitly
@@ -292,90 +398,134 @@ released when the caller will not finish it.
 
 #### `omniboard_runner_prepare_agentic_run_workspace`
 
-Resolves one matching project and run, refreshes its merge request and pipeline
-state, and applies the shared continuation logic to canonical progress. If
-work should continue, it verifies repository access, acquires the DB execution
-lease, safely reuses its validated checkout or recreates a missing or
-inconsistent checkout at a new generation, reports `in_progress`,
-and returns the prompt, result context, provider diagnostics, workspace path,
-and agent instructions. Merged or otherwise non-actionable state returns without
-a workspace. Failed application pipelines remain actionable; infrastructure-only
-pipeline failures remain non-actionable for code changes. When provider metadata and
-credentials permit it, MCP requests a pipeline retry and returns `wait` until
-the refreshed provider status becomes actionable.
+Preparation follows this sequence:
 
-The branch name uses an explicit tool input first, then the agentic run
-definition, a labeled value in the prompt, and finally a generated agentic
-branch name. The commit message uses the run definition, a labeled prompt
-value, and then a run-key-based default. Both resolved values are stored in the
-DB execution checkpoint.
+1. Resolve the matching project and run.
+2. Refresh merge request and pipeline state.
+3. Apply the shared continuation logic to canonical progress.
+4. When work can continue, verify repository access and acquire the DB execution
+   lease.
+5. Reuse a validated checkout or recreate a missing or inconsistent checkout at
+   a new generation.
+6. Report `in_progress`, or `blocked` when recovery has unresolved conflicts.
+7. Return the prompt, result context, provider diagnostics, workspace path, and
+   agent instructions.
+
+Continuation outcomes include:
+
+- Actionable work returns a prepared workspace.
+- Merged or otherwise non-actionable work returns without a workspace.
+- Failed application pipelines remain actionable.
+- Infrastructure-only pipeline failures remain non-actionable for code changes.
+- When provider metadata and credentials permit a retry, MCP requests one and
+  returns `wait` until refreshed provider status becomes actionable.
+
+Branch-name precedence is:
+
+1. Explicit tool input.
+2. Agentic run definition.
+3. Labeled value in the prompt.
+4. Generated agentic branch name.
+
+Commit-message precedence is:
+
+1. Agentic run definition.
+2. Labeled value in the prompt.
+3. Run-key-based default.
+
+Both resolved values are stored in the DB execution checkpoint.
 
 An optional repository URL is accepted only when it identifies a registered
 repository URL for the matched Omniboard project.
 
-When a previously green change request becomes stale, preparation uses the
-provider-refreshed detailed merge status as the recovery trigger. A provider
-`need_rebase` state first requests the provider-native rebase and returns
-`wait`; the external coordinator should prepare the project again after the
-provider finishes. If native rebase is unavailable or the change request has
-actual conflicts, MCP fetches the authoritative source and target branches,
-starts a local rebase in the leased runner workspace, reports the project as
-`blocked`, and returns the exact conflict files and resolution instructions.
+When a previously green change request becomes stale, recovery proceeds as
+follows:
 
-The coding agent resolves only those files, stages them, and calls finalization;
-it must not commit, rebase, or push manually. A multi-commit rebase can expose
-another conflict set, in which case finalization returns `completed: false` and
-the caller repeats the resolution/finalization step. Once clean, MCP refetches
-both branches, retries against a newly advanced target up to a bounded limit,
-and pushes the rebased source with `force-with-lease` bound to the source SHA
-that recovery started from. If the source branch advanced concurrently, no push
-is attempted; the retained workspace is reset to that remote source and must be
-prepared again. Recovery phase, attempt, source and target SHAs, and conflict
-files are checkpointed in DB execution state after every recoverable transition. Another
-MCP process can continue after the previous lease expires by recreating or
-validating the checkout from that checkpoint.
+1. Preparation uses the provider-refreshed detailed merge status as the recovery
+   trigger.
+2. For `need_rebase`, MCP requests a provider-native rebase and returns `wait`.
+   The coordinator prepares the project again after the provider finishes.
+3. If native rebase is unavailable or conflicts exist, MCP fetches the
+   authoritative source and target branches and starts a local rebase.
+4. MCP reports `blocked` and returns the exact conflict files and resolution
+   instructions.
+5. The coding agent resolves and stages only those files, then calls
+   finalization. It must not commit, rebase, or push manually.
+6. If another conflict set appears, finalization returns `completed: false` and
+   the caller repeats the resolution and finalization steps.
+7. Once clean, MCP refetches both branches and retries against a newly advanced
+   target up to a bounded limit.
+8. MCP pushes the rebased source with `force-with-lease` bound to the source SHA
+   where recovery started.
+
+Recovery safeguards are:
+
+- If the source branch advances concurrently, MCP does not push. It resets the
+  retained workspace to that remote source and requires another preparation.
+- Recovery phase, attempt, source and target SHAs, and conflict files are
+  checkpointed after every recoverable transition.
+- Another MCP process can continue from the checkpoint after the previous lease
+  expires.
 
 #### `omniboard_runner_release_agentic_run_workspace`
 
-Releases a prepared execution lease owned by the current MCP process when the
-caller will not finalize that workspace. The renewal timer stops immediately;
-the execution record and local workspace remain available for a later runner to
-resume. Calling it again, or calling it from a process that does not own the
-lease, returns `released: false` without changing another process's lease.
+Use this tool for every prepared workspace that will not be finalized.
 
-Use this tool for every prepared workspace that will not be finalized. It does
-not change agentic-run progress or mark the execution completed or abandoned.
+Release behavior is:
+
+- A lease owned by the current MCP process is released.
+- The renewal timer stops immediately.
+- The execution record and local workspace remain available for a later runner.
+- Repeated calls, or calls from a process that does not own the lease, return
+  `released: false` without changing another process's lease.
+- Agentic-run progress is unchanged.
+- The execution is not marked completed or abandoned.
 
 #### `omniboard_runner_finalize_agentic_run_workspace`
 
-Finalizes a prepared workspace after the connected coding agent has applied and
-verified the change. It creates or resumes the runner commit, retrieves fresh
-repository access, pushes the prepared branch, creates or reuses the GitLab
-merge request, and reports `committed`, `pushed`, and `mr_created`
-milestones.
+Before normal finalization or recovery, MCP:
 
-Before touching the checkout, finalization refreshes provider state and applies
-the same continuation decision used by preparation and local execution. It also
-verifies that the refreshed branch and repository still match the leased DB
-execution and its deterministic checkout generation. A `wait` or `stop`
-decision aborts finalization before Git or provider state is changed.
+1. Refreshes provider state and applies the same continuation decision used by
+   preparation and local execution.
+2. Stops before changing Git or provider state when the decision is `wait` or
+   `stop`.
+3. Verifies that the refreshed branch and repository still match the leased DB
+   execution and deterministic checkout generation.
 
-Callers must inspect the returned `completed` field. Normal finalization and a
-finished recovery return `completed: true`. Unresolved or newly surfaced rebase
-conflicts return `completed: false`, `conflictFiles`, and updated instructions
-without pushing. A successful recovery reports `pushed`, clears its DB recovery
-checkpoint, releases the execution lease, and asks Omniboard to refresh provider state
-immediately.
+After the coding agent applies and verifies a normal change, MCP:
+
+1. Creates or resumes the runner commit.
+2. Retrieves fresh repository access and pushes the prepared branch.
+3. Creates or reuses the GitLab merge request.
+4. Reports `committed`, `pushed`, and `mr_created` milestones.
+
+Callers must inspect `completed`:
+
+- `completed: true`: normal finalization or recovery finished successfully.
+- `completed: false`: recovery requires another action or remains blocked. The
+  response provides applicable errors, instructions, and conflict files. MCP
+  does not push when its recovery safety checks fail.
+
+A successful recovery also:
+
+- Reports `pushed`.
+- Clears the DB recovery checkpoint.
+- Releases the execution lease.
+- Requests an immediate Omniboard provider-state refresh.
 
 The prepared commit message is used by default. The caller may override it and
-may also supply the merge request title, description, and Git author identity.
+may also supply the merge request title and description. Commit identity comes
+from the checkout-local or global Git configuration described above.
 
 A successful push is not terminal because review, pipeline, or rebase recovery
-may still continue. When refreshed continuation state later says the change is
-finished, MCP marks the execution `completed`; a dismissed change is marked
-`abandoned`. The API cleanup cron removes completed rows after 30 days and
-abandoned rows after 7 days in bounded batches. Foreign-key cascades also remove
-execution rows when their owning run, project, group, or organization is removed.
+may still continue. Execution lifecycle outcomes are:
+
+- `completed`: refreshed continuation state says the change is finished.
+- `abandoned`: the change was dismissed.
+- The API cleanup cron removes completed rows after 30 days and abandoned rows
+  after 7 days in bounded batches.
+- Foreign-key cascades remove rows when their owning run, project, group, or
+  organization is removed.
 
 #### `omniboard_runner_report_agentic_run_progress`
 

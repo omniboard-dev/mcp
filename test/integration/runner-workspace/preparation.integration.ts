@@ -235,6 +235,12 @@ export async function runWorkspacePreparationIntegration(context: any) {
   assert.equal(recreated.workspace.generation, originalGeneration + 1);
   assert.equal(recreated.workspace.phase, 'prepared');
   prepared = recreated;
+  await execFile('git', ['config', 'user.name', 'Local Runner User'], {
+    cwd: prepared.workspace.localPath,
+  });
+  await execFile('git', ['config', 'user.email', 'local-runner@example.com'], {
+    cwd: prepared.workspace.localPath,
+  });
   const progressCountBeforeBranchMismatch = progress.length;
   await assert.rejects(
     prepareRunnerWorkspace({
