@@ -9,7 +9,7 @@ import {
 } from '../interface.js';
 import * as api from './api.service.js';
 
-const LEASE_RENEWAL_INTERVAL_MS = 60_000;
+const LEASE_RENEWAL_INTERVAL_MS = 30_000;
 const RUNNER_EXECUTION_LEASE_CONFLICT_MESSAGE =
   'Runner execution is leased by another MCP CLI process';
 const leaseOwner = `${os.hostname().slice(0, 48)}:${
@@ -164,6 +164,25 @@ export interface ReleaseRunnerExecutionResult {
   projectName: string;
   executionKey: string | null;
   released: boolean;
+}
+
+export async function releaseAllRunnerExecutions(): Promise<void> {
+  const results = await Promise.allSettled(
+    [...activeLeases.keys()].map((executionKey) =>
+      releaseRunnerExecution(executionKey)
+    )
+  );
+  const errors = results
+    .filter(
+      (result): result is PromiseRejectedResult => result.status === 'rejected'
+    )
+    .map((result) => result.reason);
+  if (errors.length > 0) {
+    throw new AggregateError(
+      errors,
+      'Failed to release all runner executions.'
+    );
+  }
 }
 
 export async function releaseRunnerExecutionByIdentity(

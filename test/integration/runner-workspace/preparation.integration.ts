@@ -219,11 +219,25 @@ export async function runWorkspacePreparationIntegration(context: any) {
   assert.match(prepared.workspace.preparedHeadSha, /^[a-f0-9]{40}$/);
   assert.equal(prepared.prompt, 'Update the icon registry.');
   assert.equal(progress.at(-1).localPath, prepared.workspace.localPath);
+  assert.deepEqual(
+    await readGitIdentity(execFile, prepared.workspace.localPath),
+    ['MCP Startup User', 'startup@example.com']
+  );
+  await execFile('git', ['config', 'user.name', 'Wrong Clone User'], {
+    cwd: prepared.workspace.localPath,
+  });
+  await execFile('git', ['config', 'user.email', 'wrong@example.com'], {
+    cwd: prepared.workspace.localPath,
+  });
   const preparedAgain = await prepareRunnerWorkspace({
     runKey: 'run-icons',
     projectName: 'project-a',
   });
   assert.equal(preparedAgain.workspace.localPath, prepared.workspace.localPath);
+  assert.deepEqual(
+    await readGitIdentity(execFile, preparedAgain.workspace.localPath),
+    ['MCP Startup User', 'startup@example.com']
+  );
   const originalWorkspacePath = prepared.workspace.localPath;
   const originalGeneration = prepared.workspace.generation;
   await fs.rm(originalWorkspacePath, { recursive: true, force: true });
@@ -235,12 +249,10 @@ export async function runWorkspacePreparationIntegration(context: any) {
   assert.equal(recreated.workspace.generation, originalGeneration + 1);
   assert.equal(recreated.workspace.phase, 'prepared');
   prepared = recreated;
-  await execFile('git', ['config', 'user.name', 'Local Runner User'], {
-    cwd: prepared.workspace.localPath,
-  });
-  await execFile('git', ['config', 'user.email', 'local-runner@example.com'], {
-    cwd: prepared.workspace.localPath,
-  });
+  assert.deepEqual(
+    await readGitIdentity(execFile, prepared.workspace.localPath),
+    ['MCP Startup User', 'startup@example.com']
+  );
   const progressCountBeforeBranchMismatch = progress.length;
   await assert.rejects(
     prepareRunnerWorkspace({
@@ -395,4 +407,12 @@ export async function runWorkspacePreparationIntegration(context: any) {
   progress.splice(progressBeforeIdentityCheck);
 
   return { prepared };
+}
+
+async function readGitIdentity(execFile: any, targetDir: string) {
+  const [name, email] = await Promise.all([
+    execFile('git', ['config', '--get', 'user.name'], { cwd: targetDir }),
+    execFile('git', ['config', '--get', 'user.email'], { cwd: targetDir }),
+  ]);
+  return [name.stdout.trim(), email.stdout.trim()];
 }

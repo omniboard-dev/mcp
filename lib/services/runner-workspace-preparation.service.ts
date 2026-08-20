@@ -18,12 +18,14 @@ import {
   resolveAgenticRunContinuation,
 } from './agentic-runs.service.js';
 import {
+  applyGitIdentity,
   checkoutRemoteBranch,
   cloneRepository,
   createBranch,
   getDefaultBranch,
   getEffectiveRepositoryUrl,
   getHeadCommit,
+  getMcpStartupGitIdentity,
   getRemoteBranchCommit,
 } from './git.service.js';
 import {
@@ -323,6 +325,8 @@ async function prepareRunnerWorkspaceInternal({
       providerRebaseFailure = rebaseRequest.reason;
     }
 
+    const gitIdentity = await getMcpStartupGitIdentity();
+
     execution = await acquireRunnerExecution({
       runKey,
       projectName,
@@ -455,6 +459,8 @@ async function prepareRunnerWorkspaceInternal({
       }
       resumed = true;
     }
+
+    await applyGitIdentity(gitIdentity, localPath);
 
     if (changeRequest && continuation.reason === 'actionable_merge_block') {
       await prepareRunnerRebaseRecovery(

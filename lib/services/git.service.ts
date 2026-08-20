@@ -41,6 +41,55 @@ const GIT_NETWORK_ENVIRONMENT_VARIABLES = [
   'no_proxy',
 ] as const;
 
+const MCP_STARTUP_DIRECTORY = process.cwd();
+let mcpStartupGitIdentityPromise: Promise<GitIdentity> | undefined;
+
+export interface GitIdentity {
+  name: string;
+  email: string;
+}
+
+export function getMcpStartupGitIdentity(): Promise<GitIdentity> {
+  mcpStartupGitIdentityPromise ??= resolveGitIdentity(MCP_STARTUP_DIRECTORY);
+  return mcpStartupGitIdentityPromise;
+}
+
+export async function applyGitIdentity(
+  identity: GitIdentity,
+  targetDir: string
+): Promise<void> {
+  await runGit(['config', '--local', 'user.name', identity.name], targetDir);
+  await runGit(['config', '--local', 'user.email', identity.email], targetDir);
+}
+
+async function resolveGitIdentity(targetDir: string): Promise<GitIdentity> {
+  const [name, email] = await Promise.all([
+    readGitConfigValue('user.name', targetDir),
+    readGitConfigValue('user.email', targetDir),
+  ]);
+  if (!name || !email) {
+    throw new Error(
+      `MCP startup project "${targetDir}" must configure Git user.name and user.email before runner workspaces can be prepared.`
+    );
+  }
+  return { name, email };
+}
+
+async function readGitConfigValue(
+  key: 'user.name' | 'user.email',
+  targetDir: string
+): Promise<string | null> {
+  try {
+    const { stdout } = await runGit(
+      ['config', '--local', '--get', key],
+      targetDir
+    );
+    return stdout.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
 export function getGitNetworkEnvironment(): NodeJS.ProcessEnv {
   return selectProcessEnvironment(GIT_NETWORK_ENVIRONMENT_VARIABLES);
 }

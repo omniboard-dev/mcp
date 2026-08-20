@@ -15,6 +15,7 @@ import { listAgenticRunProjectsTool } from './mcp/tools/list-agentic-run-project
 import { reportAgenticRunProgressTool } from './mcp/tools/report-agentic-run-progress.tool.js';
 import { reportRunnerAgenticRunProgressTool } from './mcp/tools/report-runner-agentic-run-progress.tool.js';
 import { validateAgenticRunTool } from './mcp/tools/validate-agentic-run.tool.js';
+import { releaseAllRunnerExecutions } from './services/runner-execution.service.js';
 
 const mcpCliServer = new McpCliSdkServer({
   name: '@omniboard/mcp',
@@ -35,6 +36,46 @@ registerMcpCliTool(mcpCliServer, validateAgenticRunTool);
 
 async function main() {
   const transport = new StdioServerTransport();
+  let shutdownPromise: Promise<void> | undefined;
+  const shutdown = () => {
+    shutdownPromise ??= (async () => {
+      let cleanupError: unknown;
+      try {
+        await releaseAllRunnerExecutions();
+      } catch (error) {
+        cleanupError = error;
+      }
+      try {
+        await mcpCliServer.close();
+      } catch (error) {
+        cleanupError ??= error;
+      }
+      if (cleanupError) {
+        console.error(
+          cleanupError instanceof Error ? cleanupError.message : cleanupError
+        );
+        process.exitCode = 1;
+      }
+    })();
+    return shutdownPromise;
+  };
+
+  transport.onclose = () => {
+    void shutdown();
+  };
+  process.stdin.once('end', () => {
+    void shutdown();
+  });
+  process.stdin.once('close', () => {
+    void shutdown();
+  });
+  process.once('SIGINT', () => {
+    void shutdown();
+  });
+  process.once('SIGTERM', () => {
+    void shutdown();
+  });
+
   await mcpCliServer.connect(transport);
 }
 

@@ -714,9 +714,16 @@ try {
 
   console.log('Dedicated runner MCP CLI tool registration test passed.');
 } finally {
+  const closeStartedAt = Date.now();
   await client.close();
+  const closeDurationMs = Date.now() - closeStartedAt;
   await new Promise<void>((resolve, reject) =>
     apiServer.close((error) => (error ? reject(error) : resolve()))
+  );
+  assert.equal(transport.pid, null);
+  assert(
+    closeDurationMs < 1_900,
+    `MCP stdio server took ${closeDurationMs}ms to close; expected graceful EOF shutdown before the client termination timeout.`
   );
 }
 

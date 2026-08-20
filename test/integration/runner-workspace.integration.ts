@@ -70,6 +70,13 @@ const state: Record<string, any> = {
 try {
   process.chdir(root);
   await fs.writeFile(path.join(root, 'package.json'), '{"name":"project-a"}');
+  await execFile('git', ['init'], { cwd: root });
+  await execFile('git', ['config', 'user.name', 'MCP Startup User'], {
+    cwd: root,
+  });
+  await execFile('git', ['config', 'user.email', 'startup@example.com'], {
+    cwd: root,
+  });
   await fs.mkdir(path.dirname(remotePath), { recursive: true });
   await execFile('git', ['init', '--bare', remotePath]);
   await fs.mkdir(seedPath);

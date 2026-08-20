@@ -27,6 +27,23 @@ export async function runWorkspaceRecoveryIntegration(context: any) {
     prepared,
   } = context;
 
+  const rejectingHook = path.join(remotePath, 'hooks', 'pre-receive');
+  await fs.writeFile(rejectingHook, '#!/bin/sh\nexit 1\n', { mode: 0o700 });
+  await assert.rejects(
+    finalizeRunnerWorkspace({
+      runKey: 'run-icons',
+      projectName: 'project-a',
+      localPath: prepared.workspace.localPath,
+      mergeRequestTitle: 'Fix icon registry',
+    }),
+    /pre-receive hook declined/
+  );
+  assert.equal(state.runnerLeaseToken, null);
+  assert.equal(state.runnerExecution.leaseOwner, null);
+  assert.equal(state.runnerExecution.leaseExpiresAt, null);
+  assert.equal(state.runnerExecution.heartbeatAt, null);
+  await fs.rm(rejectingHook);
+
   const finalized = await finalizeRunnerWorkspace({
     runKey: 'run-icons',
     projectName: 'project-a',
@@ -47,10 +64,10 @@ export async function runWorkspaceRecoveryIntegration(context: any) {
     .trim()
     .split('\n');
   assert.deepEqual(commitIdentity, [
-    'Local Runner User',
-    'local-runner@example.com',
-    'Local Runner User',
-    'local-runner@example.com',
+    'MCP Startup User',
+    'startup@example.com',
+    'MCP Startup User',
+    'startup@example.com',
   ]);
   assert.equal(
     finalized.mergeRequest.url,

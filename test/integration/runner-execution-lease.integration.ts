@@ -11,6 +11,7 @@ const timers: FakeTimer[] = [];
 const executions = new Map<string, any>();
 const leaseTokens = new Map<string, string>();
 const acquireBodies: any[] = [];
+const releaseRequests: string[] = [];
 
 interface FakeTimer {
   callback: () => void;
@@ -21,7 +22,7 @@ interface FakeTimer {
 try {
   Date.now = () => now;
   globalThis.setInterval = ((callback: () => void, delay: number) => {
-    assert.equal(delay, 60_000);
+    assert.equal(delay, 30_000);
     const timer: FakeTimer = {
       callback,
       cleared: false,
@@ -63,7 +64,7 @@ try {
       if (renewResult === 'conflict') {
         return jsonResponse({ message: 'lease is invalid' }, 409);
       }
-      execution.leaseExpiresAt = new Date(now + 300_000).toISOString();
+      execution.leaseExpiresAt = new Date(now + 120_000).toISOString();
       const leaseToken = `${body.leaseToken}-renewed`;
       leaseTokens.set(execution.executionKey, leaseToken);
       return jsonResponse({ execution, leaseToken });
@@ -71,6 +72,7 @@ try {
 
     assert.equal(body.leaseToken, leaseTokens.get(execution.executionKey));
     if (match[2] === 'release') {
+      releaseRequests.push(execution.executionKey);
       return jsonResponse(execution);
     }
 
@@ -83,6 +85,7 @@ try {
   const {
     acquireRunnerExecution,
     checkpointRunnerExecution,
+    releaseAllRunnerExecutions,
     releaseRunnerExecution,
     releaseRunnerExecutionByIdentity,
   } = await import('../../dist/services/runner-execution.service.js');
@@ -101,7 +104,7 @@ try {
   now += 60_000;
   renewResult = 'success';
   await trigger(firstTimer);
-  now += 240_001;
+  now += 60_001;
   await checkpointRunnerExecution(first, { phase: 'preparing' });
   await releaseRunnerExecution(first.executionKey);
   assert.equal(firstTimer.cleared, true);
@@ -158,8 +161,25 @@ try {
   );
   assert.equal(expiredTimer.cleared, true);
 
-  await acquireRunnerExecution(acquireInput('run-expired'));
+  const reacquiredExpired = await acquireRunnerExecution(
+    acquireInput('run-expired')
+  );
   assert.equal('leaseToken' in acquireBodies.at(-1), false);
+  await releaseRunnerExecution(reacquiredExpired.executionKey);
+
+  const shutdownA = await acquireRunnerExecution(
+    acquireInput('run-shutdown-a')
+  );
+  const shutdownB = await acquireRunnerExecution(
+    acquireInput('run-shutdown-b')
+  );
+  await releaseAllRunnerExecutions();
+  assert.deepEqual(
+    releaseRequests.slice(-2).sort(),
+    [shutdownA.executionKey, shutdownB.executionKey].sort()
+  );
+  assert.equal(timers.at(-2)?.cleared, true);
+  assert.equal(timers.at(-1)?.cleared, true);
 
   console.log('Runner execution lease renewal test passed.');
 } finally {
@@ -199,7 +219,7 @@ function createExecution(executionKey: string, input: any) {
     recovery: null,
     generation: 1,
     leaseOwner: input.leaseOwner,
-    leaseExpiresAt: new Date(now + 300_000).toISOString(),
+    leaseExpiresAt: new Date(now + 120_000).toISOString(),
     heartbeatAt: timestamp,
     completedAt: null,
     cleanupAfter: null,

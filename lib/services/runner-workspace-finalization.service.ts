@@ -12,7 +12,9 @@ import {
   resolveAgenticRunContinuation,
 } from './agentic-runs.service.js';
 import {
+  applyGitIdentity,
   getEffectiveRepositoryUrl,
+  getMcpStartupGitIdentity,
   getWorkingTreeStatus,
   pushBranch,
 } from './git.service.js';
@@ -104,6 +106,7 @@ export async function finalizeRunnerWorkspace({
   const resolvedGitValues = resolveRunnerGitValues(projectState.run, {
     branch: projectState.progress.branch ?? undefined,
   });
+  const gitIdentity = await getMcpStartupGitIdentity();
   const execution = await acquireRunnerExecution({
     runKey,
     projectName,
@@ -153,6 +156,7 @@ export async function finalizeRunnerWorkspace({
     }
 
     await assertGitWorkspaceIdentity(localPath);
+    await applyGitIdentity(gitIdentity, localPath);
     await assertCurrentRunnerBranch(state, localPath);
     const status = await getWorkingTreeStatus(localPath);
     const commitSha = status
@@ -246,19 +250,33 @@ export async function finalizeRunnerWorkspace({
       progressReports,
     };
   } catch (error) {
+    const failureMessage =
+      error instanceof Error ? error.message : String(error);
     progressReports.push(
       await reportRunnerAgenticRunProgressSafely(runKey, projectName, {
         status: 'failed',
         repositoryUrl: state.repositoryUrl,
         localPath,
         branch: state.branch,
-        error: error instanceof Error ? error.message : String(error),
+        error: failureMessage,
         notes: 'Dedicated runner finalization failed.',
         metadata: {
           mcpTool: 'omniboard_runner_finalize_agentic_run_workspace',
         },
       })
     );
+    try {
+      await releaseRunnerExecution(state.executionKey);
+    } catch (cleanupError) {
+      throw new Error(
+        failureMessage +
+          ' Lease cleanup also failed: ' +
+          (cleanupError instanceof Error
+            ? cleanupError.message
+            : String(cleanupError)),
+        { cause: error }
+      );
+    }
     throw error;
   }
 }
