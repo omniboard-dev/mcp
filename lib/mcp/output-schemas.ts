@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import {
+  AGENTIC_RUN_PROJECT_FULFILLMENT_VALUES,
   AGENTIC_RUN_PROGRESS_STATUS_VALUES,
   AGENTIC_RUN_RESOLUTION_VALUES,
   RUNNER_EXECUTION_PHASE_VALUES,
@@ -153,6 +154,7 @@ export const matchedProjectsOutputSchema = z
     hasMore: z.boolean(),
     view: z.enum(['full', 'summary']),
     statuses: z.array(z.enum(AGENTIC_RUN_PROGRESS_STATUS_VALUES)),
+    fulfillment: z.enum(AGENTIC_RUN_PROJECT_FULFILLMENT_VALUES),
   })
   .passthrough();
 

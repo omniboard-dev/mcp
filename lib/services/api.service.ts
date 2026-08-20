@@ -15,6 +15,7 @@ import {
   AgenticRunProgressUpsertInput,
   AgenticRunProgressUpsertResponse,
   AgenticRunProjectState,
+  AgenticRunProjectFulfillment,
   AgenticRunProviderSnapshot,
   AgenticRunResponse,
   AgenticRunsResponse,
@@ -136,9 +137,11 @@ export const getAgenticRun = async (
 export const getAgenticRunMatchedProjects = async ({
   checkName,
   runKey,
+  fulfillment,
 }: {
   checkName?: string;
   runKey?: string;
+  fulfillment?: AgenticRunProjectFulfillment;
 }): Promise<AgenticRunMatchedProjectsResponse> => {
   const response = await request<McpCliApiMatchedProjectsResponse>(
     MCP_CLI_MATCHED_PROJECTS_ENDPOINT,
@@ -146,6 +149,7 @@ export const getAgenticRunMatchedProjects = async ({
       query: {
         checkName,
         runKey,
+        fulfillment,
       },
     }
   );
@@ -172,6 +176,7 @@ export const getAgenticRunMatchedProjects = async ({
     runs,
     projects: (response.projects ?? []).map(normalizeMatchedProject),
     total: response.total ?? response.projects?.length ?? 0,
+    fulfillment: response.fulfillment ?? fulfillment ?? 'fulfilled',
   };
 };
 

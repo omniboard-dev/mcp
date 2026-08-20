@@ -14,6 +14,7 @@ import * as api from './api.service.js';
 import {
   getRunnerAgenticRun,
   listAgenticRunProjects,
+  reportRunnerAgenticRunProgress,
   reportRunnerAgenticRunProgressSafely,
   resolveAgenticRunContinuation,
 } from './agentic-runs.service.js';
@@ -72,6 +73,8 @@ import {
   defaultRunnerCommitMessage,
   resolveRunnerGitValues,
 } from './runner-workspace-values.service.js';
+
+const MAX_AGENTIC_RUN_RESOLUTION_REASON_LENGTH = 255;
 
 const workspacePreparations = new Map<
   string,
@@ -213,12 +216,10 @@ async function prepareRunnerWorkspaceInternal({
   let localPath: string | undefined;
   let createdWorkspace = false;
   let execution: RunnerExecution | undefined;
+  let projectState: AgenticRunProjectState | undefined;
 
   try {
-    let projectState = await api.refreshAgenticRunProjectState(
-      runKey,
-      projectName
-    );
+    projectState = await api.refreshAgenticRunProjectState(runKey, projectName);
     projectState = await refreshRunnerProjectStateLocallyIfNeeded({
       runKey,
       projectName,
@@ -226,6 +227,14 @@ async function prepareRunnerWorkspaceInternal({
       branch,
       projectState,
     });
+    const archivedProjectFeedback = findArchivedProjectFeedback(projectState);
+    if (archivedProjectFeedback) {
+      return dismissArchivedProject(
+        projectState,
+        archivedProjectFeedback,
+        resolvedRepositoryUrl
+      );
+    }
     const continuation = await resolveAgenticRunContinuation(projectState);
     if (continuation.action !== 'continue') {
       if (continuation.action === 'stop') {
@@ -536,6 +545,18 @@ async function prepareRunnerWorkspaceInternal({
       }
     }
 
+    const archivedProjectFeedback = projectState
+      ? findArchivedProjectFeedback(projectState, error)
+      : null;
+    if (projectState && archivedProjectFeedback) {
+      return dismissArchivedProject(
+        projectState,
+        archivedProjectFeedback,
+        resolvedRepositoryUrl,
+        localPath
+      );
+    }
+
     const failureMessage = cleanupError
       ? toErrorMessage(error) +
         ' Cleanup also failed: ' +
@@ -553,6 +574,112 @@ async function prepareRunnerWorkspaceInternal({
     });
     throw error;
   }
+}
+
+async function dismissArchivedProject(
+  projectState: AgenticRunProjectState,
+  archiveDiagnostic: string,
+  repositoryUrl?: string,
+  localPath?: string
+): Promise<RunnerWorkspacePrepareResult> {
+  const resolutionReason = archiveDiagnostic.slice(
+    0,
+    MAX_AGENTIC_RUN_RESOLUTION_REASON_LENGTH
+  );
+  const progressReport = await reportRunnerAgenticRunProgress(
+    projectState.run.runKey,
+    projectState.project.name,
+    {
+      status: 'done',
+      resolution: 'dismissed',
+      resolutionReason,
+      repositoryUrl:
+        repositoryUrl ?? projectState.project.repositoryUrl ?? null,
+      localPath,
+      notes:
+        'Automatically dismissed because the source-control project is archived and cannot accept changes.',
+      metadata: {
+        mcpTool: 'omniboard_runner_prepare_agentic_run_workspace',
+        automaticDismissal: 'archived_project',
+        ...(resolutionReason !== archiveDiagnostic
+          ? { archiveDiagnostic }
+          : {}),
+      },
+    }
+  );
+  await completeRunnerExecutionByIdentity(
+    projectState.run.runKey,
+    projectState.project.name,
+    'abandoned'
+  );
+
+  const dismissedProjectState: AgenticRunProjectState = {
+    ...projectState,
+    progress: {
+      ...projectState.progress,
+      status: 'done',
+      resolution: 'dismissed',
+      resolutionReason,
+    },
+  };
+  const continuation: AgenticRunContinuationDecision = {
+    action: 'stop',
+    reason: 'change_dismissed',
+    instructions: [
+      'The project was automatically dismissed because its source-control repository is archived and cannot accept changes.',
+      `Dismissal reason: ${resolutionReason}`,
+    ],
+    diagnostics: [archiveDiagnostic],
+  };
+
+  return {
+    ...createNonContinuablePreparation(dismissedProjectState, continuation),
+    progressReport,
+  };
+}
+
+function findArchivedProjectFeedback(
+  projectState: AgenticRunProjectState,
+  error?: unknown
+) {
+  const progressError = projectState.progress.error;
+  const candidates = [
+    error === undefined ? null : toErrorMessage(error),
+    projectState.providerSync.error,
+    typeof progressError === 'string' ? progressError : null,
+    projectState.progress.pipelineFailureSummary,
+    ...projectState.providerSync.diagnostics.flatMap((diagnostic) => [
+      diagnostic.failureReason,
+      diagnostic.traceExcerpt,
+    ]),
+  ];
+
+  for (const candidate of candidates) {
+    if (typeof candidate !== 'string') continue;
+    const reason = candidate.trim().replace(/\s+/g, ' ');
+    if (isArchivedProjectFeedback(reason)) return reason;
+  }
+  return null;
+}
+
+function isArchivedProjectFeedback(feedback: string) {
+  const identifiesArchivedProject =
+    /\b(?:project|repository|repo)\s+(?:is|was|has been|had been|became|remains)\s+archived\b/i.test(
+      feedback
+    ) || /\barchived\s+(?:project|repository|repo)\b/i.test(feedback);
+  const identifiesChangeBlock =
+    /\bread[ -]?only\b/i.test(feedback) ||
+    /\b(?:cannot|can not|can't|does not|doesn't|no longer)\b.{0,80}\b(?:accept|allow|change|modify|push|update|write)\w*\b/i.test(
+      feedback
+    ) ||
+    /\b(?:change|commit|push|update|write)\w*\b.{0,80}\b(?:denied|disabled|not allowed|rejected)\b/i.test(
+      feedback
+    );
+
+  return (
+    identifiesArchivedProject ||
+    (/\barchiv(?:e|ed|al)\b/i.test(feedback) && identifiesChangeBlock)
+  );
 }
 
 async function createAutomaticRebasePreparation(

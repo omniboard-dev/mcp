@@ -25,6 +25,92 @@ export async function runWorkspacePreparationIntegration(context: any) {
     resolveRunnerGitValues,
   } = context;
 
+  state.projectArchived = true;
+  progress.length = 0;
+  const archivedProviderPreparation = await prepareRunnerWorkspace({
+    runKey: 'run-icons',
+    projectName: 'project-a',
+  });
+  assert.equal(archivedProviderPreparation.workspace, undefined);
+  assert.deepEqual(
+    [
+      archivedProviderPreparation.continuation.action,
+      archivedProviderPreparation.continuation.reason,
+    ],
+    ['stop', 'change_dismissed']
+  );
+  assert.equal(progress.at(-1).status, 'done');
+  assert.equal(progress.at(-1).resolution, 'dismissed');
+  assert.equal(
+    progress.at(-1).resolutionReason,
+    'GitLab project is archived and cannot accept changes.'
+  );
+  assert.equal(progress.at(-1).metadata.automaticDismissal, 'archived_project');
+  state.projectArchived = false;
+
+  state.projectProgressStatus = 'failed';
+  state.projectPipelineStatus = 'failed';
+  state.projectPipelineFailureSummary =
+    'CI rejected the update because the repository was archived and is read-only.';
+  progress.length = 0;
+  const archivedCiPreparation = await prepareRunnerWorkspace({
+    runKey: 'run-icons',
+    projectName: 'project-a',
+  });
+  assert.equal(archivedCiPreparation.workspace, undefined);
+  assert.equal(archivedCiPreparation.continuation.reason, 'change_dismissed');
+  assert.equal(progress.at(-1).status, 'done');
+  assert.equal(progress.at(-1).resolution, 'dismissed');
+  assert.equal(
+    progress.at(-1).resolutionReason,
+    state.projectPipelineFailureSummary
+  );
+
+  state.projectPipelineFailureSummary = 'unit-tests failed';
+  state.projectPipelineTraceExcerpt =
+    'The repository is archived and cannot accept changes.';
+  progress.length = 0;
+  const archivedTestOutputPreparation = await prepareRunnerWorkspace({
+    runKey: 'run-icons',
+    projectName: 'project-a',
+  });
+  assert.equal(archivedTestOutputPreparation.workspace, undefined);
+  assert.equal(
+    archivedTestOutputPreparation.continuation.reason,
+    'change_dismissed'
+  );
+  assert.equal(progress.at(-1).status, 'done');
+  assert.equal(progress.at(-1).resolution, 'dismissed');
+  assert.equal(
+    progress.at(-1).resolutionReason,
+    state.projectPipelineTraceExcerpt
+  );
+
+  const longArchivedTrace =
+    'The repository is archived and cannot accept changes. ' + 'x'.repeat(300);
+  state.projectPipelineTraceExcerpt = longArchivedTrace;
+  progress.length = 0;
+  const longArchivedTracePreparation = await prepareRunnerWorkspace({
+    runKey: 'run-icons',
+    projectName: 'project-a',
+  });
+  assert.equal(
+    longArchivedTracePreparation.continuation.reason,
+    'change_dismissed'
+  );
+  assert.equal(progress.at(-1).resolutionReason.length, 255);
+  assert.equal(progress.at(-1).metadata.archiveDiagnostic, longArchivedTrace);
+  assert.equal(
+    longArchivedTracePreparation.continuation.diagnostics[0],
+    longArchivedTrace
+  );
+
+  state.projectProgressStatus = 'pending';
+  state.projectPipelineStatus = null;
+  state.projectPipelineFailureSummary = 'unit-tests failed';
+  state.projectPipelineTraceExcerpt = 'Expected true, received false';
+  progress.length = 0;
+
   await assert.rejects(
     prepareRunnerWorkspace({
       runKey: 'run-icons',

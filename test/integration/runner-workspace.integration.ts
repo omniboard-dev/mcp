@@ -50,12 +50,15 @@ const state: Record<string, any> = {
   agenticRunLookupCount: 0,
   matchedProjectsLookupCount: 0,
   canPush: true,
+  projectArchived: false,
   projectProgressStatus: 'pending',
   projectProgressResolution: null,
   projectProgressBranch: 'agentic/run-icons',
   projectPipelineStatus: null,
   projectPipelineUrl: null,
   projectPipelineFailureReason: 'script_failure',
+  projectPipelineFailureSummary: 'unit-tests failed',
+  projectPipelineTraceExcerpt: 'Expected true, received false',
   projectMergeRequestUrl: null,
   projectMergeRequestState: null,
   projectMergeRequestDetailedStatus: null,
@@ -293,7 +296,7 @@ try {
           pipelineUrl: state.projectPipelineUrl,
           pipelineFailureSummary:
             state.projectPipelineStatus === 'failed'
-              ? 'unit-tests failed'
+              ? state.projectPipelineFailureSummary
               : null,
         },
         providerSync: {
@@ -308,7 +311,7 @@ try {
                     stage: 'test',
                     status: 'failed',
                     failureReason: state.projectPipelineFailureReason,
-                    traceExcerpt: 'Expected true, received false',
+                    traceExcerpt: state.projectPipelineTraceExcerpt,
                   },
                 ]
               : [],
@@ -479,7 +482,7 @@ try {
     ) {
       state.bitbucketAuthorization = request.headers.authorization;
       return send(response, {
-        archived: false,
+        archived: state.projectArchived,
         state: 'AVAILABLE',
       });
     }
@@ -689,7 +692,7 @@ try {
       /\/gitlab\/api\/v4\/projects\/.+$/.test(url.pathname)
     ) {
       return send(response, {
-        archived: false,
+        archived: state.projectArchived,
         repository_access_level: 'enabled',
         merge_requests_access_level: 'enabled',
         permissions: {

@@ -81,6 +81,7 @@ const filteredList = createAgenticRunProjectList(
     runs: [run],
     projects,
     total: projects.length,
+    fulfillment: 'fulfilled',
   },
   {
     statuses: ['failed', 'blocked', 'failed'],
@@ -113,6 +114,7 @@ const batchCandidates = createAgenticRunProjectList(
     runs: [run],
     projects: projects.slice(0, 3),
     total: 3,
+    fulfillment: 'fulfilled',
   },
   { statuses: ['failed', 'blocked'] }
 );
@@ -174,6 +176,7 @@ const sizedCandidates = createAgenticRunProjectList(
     runs: [run],
     projects: sizedProjects,
     total: sizedProjects.length,
+    fulfillment: 'fulfilled',
   },
   { statuses: ['failed'] }
 );
@@ -251,6 +254,7 @@ const multiDotCandidates = createAgenticRunProjectList(
     runs: [run],
     projects: multiDotProjects,
     total: multiDotProjects.length,
+    fulfillment: 'fulfilled',
   },
   { statuses: ['failed'] }
 );
@@ -583,7 +587,9 @@ const apiResponse = {
   runs: [run],
   projects,
   total: projects.length,
+  fulfillment: 'fulfilled',
 };
+const requestedFulfillments: Array<string | null> = [];
 const apiServer = http.createServer((request, response) => {
   const url = new URL(request.url, 'http://localhost');
   response.setHeader('Content-Type', 'application/json');
@@ -591,7 +597,14 @@ const apiServer = http.createServer((request, response) => {
     request.method === 'GET' &&
     url.pathname === '/mcp-cli/matched-projects'
   ) {
-    response.end(JSON.stringify(apiResponse));
+    const fulfillment = url.searchParams.get('fulfillment');
+    requestedFulfillments.push(fulfillment);
+    response.end(
+      JSON.stringify({
+        ...apiResponse,
+        fulfillment: fulfillment ?? 'fulfilled',
+      })
+    );
     return;
   }
   response.statusCode = 404;
@@ -630,7 +643,13 @@ try {
   const projectListTool = tools.find(
     (tool) => tool.name === 'omniboard_runner_list_agentic_run_projects'
   );
-  for (const property of ['statuses', 'offset', 'limit', 'view']) {
+  for (const property of [
+    'fulfillment',
+    'statuses',
+    'offset',
+    'limit',
+    'view',
+  ]) {
     assert(property in projectListTool.inputSchema.properties);
   }
 
@@ -659,6 +678,7 @@ try {
   assert.equal(listedContent.returned, 1);
   assert.equal(listedContent.hasMore, true);
   assert.deepEqual(listedContent.statuses, ['failed']);
+  assert.equal(listedContent.fulfillment, 'fulfilled');
   assert.equal(listedContent.projects[0].name, 'project-a');
   const listedProjectSizeFixture = projects[0];
   assert('projectSize' in listedProjectSizeFixture);
@@ -670,6 +690,22 @@ try {
   assert(!('prompt' in listedContent.run));
   assert(!('prompt' in listedContent.check));
   assert.deepEqual(JSON.parse(listedProjects.content[0].text), listedContent);
+
+  const unfulfilledProjects = await client.callTool({
+    name: 'omniboard_runner_list_agentic_run_projects',
+    arguments: {
+      runKey: run.runKey,
+      fulfillment: 'unfulfilled',
+      limit: 1,
+      view: 'summary',
+    },
+  });
+  assert(!unfulfilledProjects.isError);
+  const unfulfilledContent = matchedProjectsOutputSchema.parse(
+    unfulfilledProjects.structuredContent
+  );
+  assert.equal(unfulfilledContent.fulfillment, 'unfulfilled');
+  assert(requestedFulfillments.includes('unfulfilled'));
 
   const releasedWorkspace = await client.callTool({
     name: 'omniboard_runner_release_agentic_run_workspace',
@@ -791,6 +827,7 @@ function candidatesWithPrompt(prompt, candidateProjects) {
       runs: [run],
       projects: candidateProjects,
       total: candidateProjects.length,
+      fulfillment: 'fulfilled',
     },
     { statuses: ['failed'] }
   );

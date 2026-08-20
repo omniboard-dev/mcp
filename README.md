@@ -331,14 +331,16 @@ scheduler has not already selected a run.
 
 #### `omniboard_runner_list_agentic_run_projects`
 
-Lists Omniboard projects matching an agentic check or run. Pass `runKey` to
-target one run, or `checkName` to discover matching projects and active runs
-for a check. This operation does not resolve the MCP CLI process working directory
-or report progress.
+Lists checked Omniboard projects for an agentic check or run. Pass `runKey` to
+target one run, or `checkName` to discover projects and active runs for a check.
+Fulfilled projects are returned by default. This operation does not resolve the
+MCP CLI process working directory or report progress.
 
 Available query controls are:
 
 - `statuses`: filters by canonical stored progress status.
+- `fulfillment`: selects `"fulfilled"` (the default) or `"unfulfilled"`
+  projects. Unchecked projects are not part of this query.
 - `offset` and `limit`: page the filtered result.
 - `view: "summary"`: omits project result payloads and expanded run metadata
   while retaining repository, progress, merge request, pipeline, and error
@@ -354,6 +356,8 @@ Pagination fields are:
 Listing is side-effect free with respect to agentic-run and project state: it
 reads stored progress and does not refresh providers, record snapshots, prepare
 workspaces, or report progress. Stored provider details can therefore be stale.
+Unfulfilled selection is currently for discovery; workspace preparation and
+batch execution continue to select fulfilled projects.
 
 Use the tools in this order:
 

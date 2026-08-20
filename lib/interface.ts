@@ -91,6 +91,7 @@ export interface McpCliApiMatchedProjectsResponse {
   runs: McpCliApiAgenticRun[];
   projects: McpCliApiMatchedProject[];
   total: number;
+  fulfillment?: AgenticRunProjectFulfillment;
 }
 
 export interface McpCliApiAgenticRun {
@@ -184,9 +185,18 @@ export interface AgenticRunMatchedProjectsResponse {
   runs: AgenticRunSummary[];
   projects: AgenticRunMatchedProject[];
   total: number;
+  fulfillment: AgenticRunProjectFulfillment;
 }
 
 export type AgenticRunProjectListView = 'full' | 'summary';
+
+export const AGENTIC_RUN_PROJECT_FULFILLMENT_VALUES = [
+  'fulfilled',
+  'unfulfilled',
+] as const;
+
+export type AgenticRunProjectFulfillment =
+  (typeof AGENTIC_RUN_PROJECT_FULFILLMENT_VALUES)[number];
 
 export interface AgenticRunMatchedProjectsListResponse
   extends Omit<AgenticRunMatchedProjectsResponse, 'check'> {
@@ -201,6 +211,7 @@ export interface AgenticRunMatchedProjectsListResponse
   hasMore: boolean;
   view: AgenticRunProjectListView;
   statuses: AgenticRunProgressStatus[];
+  fulfillment: AgenticRunProjectFulfillment;
 }
 
 export interface AgenticRunSummary {
