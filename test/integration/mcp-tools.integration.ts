@@ -546,7 +546,7 @@ const crossProcessLeaseBatch = await prepareNextRunnerProjects(
     prepareWorkspace: async ({ projectName }) => {
       if (projectName === 'project-a') {
         throw new RunnerExecutionLeaseConflictError(
-          'Runner execution is leased by another MCP process'
+          'Runner execution is leased by another MCP CLI process'
         );
       }
       return preparation(projectName, 'continue', true);
@@ -587,7 +587,10 @@ const apiResponse = {
 const apiServer = http.createServer((request, response) => {
   const url = new URL(request.url, 'http://localhost');
   response.setHeader('Content-Type', 'application/json');
-  if (request.method === 'GET' && url.pathname === '/mcp/matched-projects') {
+  if (
+    request.method === 'GET' &&
+    url.pathname === '/mcp-cli/matched-projects'
+  ) {
     response.end(JSON.stringify(apiResponse));
     return;
   }
@@ -605,7 +608,7 @@ const transport = new StdioClientTransport({
   args: ['dist/index.js'],
   env: {
     ...process.env,
-    OMNIBOARD_API_KEY_MCP: 'registration-test-key',
+    OMNIBOARD_API_KEY_MCP_CLI: 'registration-test-key',
     OMNIBOARD_API_URL: `http://127.0.0.1:${apiAddress.port}`,
   },
 });
@@ -709,7 +712,7 @@ try {
     assert(property in progressProperties);
   }
 
-  console.log('Dedicated runner MCP tool registration test passed.');
+  console.log('Dedicated runner MCP CLI tool registration test passed.');
 } finally {
   await client.close();
   await new Promise<void>((resolve, reject) =>

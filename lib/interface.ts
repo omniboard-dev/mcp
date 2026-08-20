@@ -27,39 +27,39 @@ export enum ProjectType {
   REPO = 'repo',
 }
 
-export interface McpApiProject {
+export interface McpCliApiProject {
   id: number;
   name: string;
   lastAnalysisDate?: string | Date;
 }
 
-export interface McpApiCheck {
+export interface McpCliApiCheck {
   name: string;
   type: string;
   description: string | null;
   agentic: boolean;
   prompt: string | null;
   runKey?: string | null;
-  agenticRuns?: McpApiAgenticRun[];
+  agenticRuns?: McpCliApiAgenticRun[];
 }
 
-export interface McpApiCheckSummary extends McpApiCheck {
+export interface McpCliApiCheckSummary extends McpCliApiCheck {
   value: boolean | null;
 }
 
-export interface McpApiChecksResponse {
-  project: McpApiProject;
-  checks: McpApiCheckSummary[];
+export interface McpCliApiChecksResponse {
+  project: McpCliApiProject;
+  checks: McpCliApiCheckSummary[];
 }
 
-export interface McpApiRunResponse {
-  project: Pick<McpApiProject, 'id' | 'name'>;
-  check: McpApiCheck;
-  run: McpApiAgenticRun;
+export interface McpCliApiRunResponse {
+  project: Pick<McpCliApiProject, 'id' | 'name'>;
+  check: McpCliApiCheck;
+  run: McpCliApiAgenticRun;
   result: unknown;
 }
 
-export interface McpApiMatchedProject {
+export interface McpCliApiMatchedProject {
   id: number;
   name: string;
   lastAnalysisDate?: string | Date | null;
@@ -85,21 +85,21 @@ export interface ProjectSize extends ProjectSizeMetrics {
   others?: ProjectSizeMetrics;
 }
 
-export interface McpApiMatchedProjectsResponse {
-  check: McpApiCheck;
-  run: McpApiAgenticRun | null;
-  runs: McpApiAgenticRun[];
-  projects: McpApiMatchedProject[];
+export interface McpCliApiMatchedProjectsResponse {
+  check: McpCliApiCheck;
+  run: McpCliApiAgenticRun | null;
+  runs: McpCliApiAgenticRun[];
+  projects: McpCliApiMatchedProject[];
   total: number;
 }
 
-export interface McpApiAgenticRun {
+export interface McpCliApiAgenticRun {
   runKey?: string;
   key?: string;
   id?: string | number;
   checkName?: string;
-  check?: Partial<McpApiCheck> | null;
-  project?: Partial<McpApiProject> | null;
+  check?: Partial<McpCliApiCheck> | null;
+  project?: Partial<McpCliApiProject> | null;
   prompt?: string | null;
   branchName?: string | null;
   commitMessage?: string | null;
@@ -145,7 +145,7 @@ export interface AgenticRunValidationResponse {
 }
 
 export interface AgenticRunsResponse {
-  project: McpApiProject;
+  project: McpCliApiProject;
   runs: AgenticRunSummary[];
   total: number;
 }
@@ -156,7 +156,7 @@ export interface RunnerAgenticRunsResponse {
 }
 
 export interface AgenticRunResponse {
-  project: Pick<McpApiProject, 'id' | 'name'>;
+  project: Pick<McpCliApiProject, 'id' | 'name'>;
   run: AgenticRunSummary;
   result?: unknown;
   agentContext?: AgenticRunAgentContext;
@@ -179,7 +179,7 @@ export interface AgenticRunMatchedProject {
 }
 
 export interface AgenticRunMatchedProjectsResponse {
-  check: McpApiCheck;
+  check: McpCliApiCheck;
   run: AgenticRunSummary | null;
   runs: AgenticRunSummary[];
   projects: AgenticRunMatchedProject[];
@@ -190,9 +190,9 @@ export type AgenticRunProjectListView = 'full' | 'summary';
 
 export interface AgenticRunMatchedProjectsListResponse
   extends Omit<AgenticRunMatchedProjectsResponse, 'check'> {
-  check: Omit<McpApiCheck, 'agenticRuns' | 'prompt'> & {
-    agenticRuns?: McpApiCheck['agenticRuns'];
-    prompt?: McpApiCheck['prompt'];
+  check: Omit<McpCliApiCheck, 'agenticRuns' | 'prompt'> & {
+    agenticRuns?: McpCliApiCheck['agenticRuns'];
+    prompt?: McpCliApiCheck['prompt'];
   };
   unfilteredTotal: number;
   returned: number;
@@ -206,8 +206,8 @@ export interface AgenticRunMatchedProjectsListResponse
 export interface AgenticRunSummary {
   runKey: string;
   checkName: string;
-  check?: Partial<McpApiCheck> | null;
-  project?: Partial<McpApiProject> | null;
+  check?: Partial<McpCliApiCheck> | null;
+  project?: Partial<McpCliApiProject> | null;
   prompt?: string | null;
   branchName?: string | null;
   commitMessage?: string | null;
@@ -217,7 +217,7 @@ export interface AgenticRunSummary {
   isActive: boolean;
   creationDate?: string | Date | null;
   updateDate?: string | Date | null;
-  raw?: McpApiAgenticRun;
+  raw?: McpCliApiAgenticRun;
 }
 
 export const AGENTIC_RUN_STATUS_VALUES = [
@@ -264,7 +264,7 @@ export interface AgenticRunProviderPipelineDiagnostic {
 }
 
 export interface AgenticRunProviderSnapshot {
-  provider: McpRepositoryAccess['provider'];
+  provider: RepositoryAccess['provider'];
   repositoryId: string;
   changeRequestId: string;
   commitSha?: string | null;
@@ -334,7 +334,7 @@ export type AgenticRunContinuationReason =
 export interface AgenticRunPipelineRetryResult {
   attempted: boolean;
   retried: boolean;
-  provider?: McpRepositoryAccess['provider'];
+  provider?: RepositoryAccess['provider'];
   pipelineId?: number;
   pipelineUrl?: string;
   status?: string;
@@ -420,7 +420,7 @@ export interface BitbucketDataCenterRepositoryAccess {
   token: string;
 }
 
-export type McpRepositoryAccess =
+export type RepositoryAccess =
   | GitlabRepositoryAccess
   | BitbucketDataCenterRepositoryAccess;
 
@@ -445,7 +445,7 @@ export interface RunnerExecution {
   checkName: string;
   projectName: string;
   repositoryUrl: string;
-  sourceControlProvider: McpRepositoryAccess['provider'];
+  sourceControlProvider: RepositoryAccess['provider'];
   sourceControlRepositoryId: string;
   branch: string;
   targetBranch: string | null;
@@ -486,7 +486,7 @@ export interface RunnerWorkspaceState {
   projectPath: string;
   preparedHeadSha: string;
   commitSha?: string;
-  provider: McpRepositoryAccess['provider'];
+  provider: RepositoryAccess['provider'];
   apiBaseUrl: string;
   recovery?: RunnerWorkspaceRebaseRecovery;
 }

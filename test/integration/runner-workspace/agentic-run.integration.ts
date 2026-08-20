@@ -193,7 +193,7 @@ export async function runAgenticRunIntegration(context: any) {
     /already in progress.*different repository or branch options/
   );
   await assert.rejects(insecurePreparation, /secure HTTPS/);
-  process.env.OMNIBOARD_MCP_ALLOW_LOCAL_TRANSPORTS = 'true';
+  process.env.OMNIBOARD_MCP_CLI_ALLOW_LOCAL_TRANSPORTS = 'true';
 
   const bitbucketAccess = {
     provider: 'bitbucket_data_center',

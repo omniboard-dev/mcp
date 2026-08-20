@@ -2,9 +2,9 @@ import { z } from 'zod';
 
 import { finalizeRunnerWorkspace } from '../../services/runner-workspace.service.js';
 import { runnerWorkspaceFinalizeOutputSchema } from '../output-schemas.js';
-import { McpToolDefinition } from '../shared.js';
+import { McpCliToolDefinition } from '../shared.js';
 
-export const finalizeAgenticRunWorkspaceTool: McpToolDefinition = {
+export const finalizeAgenticRunWorkspaceTool: McpCliToolDefinition = {
   name: 'omniboard_runner_finalize_agentic_run_workspace',
   description:
     'Dedicated runner mode: finalize normal work or continue a prepared merge-conflict recovery. Normal work is committed, pushed, and linked to a change request. Recovery may return completed=false with the next exact conflict files; when complete it rebases onto the latest target and updates the validated source branch with force-with-lease.',

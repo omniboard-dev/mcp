@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-import { McpRepositoryAccess } from '../interface.js';
+import { RepositoryAccess } from '../interface.js';
 import { getGitNetworkEnvironment } from './git.service.js';
 import { resolveGitUsername } from './source-control.service.js';
 import {
@@ -11,7 +11,7 @@ import {
 } from './url-security.service.js';
 
 export async function withGitCredentials<T>(
-  access: McpRepositoryAccess,
+  access: RepositoryAccess,
   targetDir: string,
   action: (env: NodeJS.ProcessEnv) => Promise<T>
 ) {
@@ -130,7 +130,7 @@ function isSecureRepositoryUrl(repositoryUrl: string) {
 }
 
 export function assertAuthorizedRepositoryUrl(
-  access: McpRepositoryAccess,
+  access: RepositoryAccess,
   repositoryUrl: string,
   effectiveRepositoryUrl: string
 ) {
@@ -156,7 +156,7 @@ export function assertAuthorizedRepositoryUrl(
     )
   ) {
     throw new Error(
-      'Credentialed repository URLs must use HTTPS. Local file and loopback HTTP transports require OMNIBOARD_MCP_ALLOW_LOCAL_TRANSPORTS=true.'
+      'Credentialed repository URLs must use HTTPS. Local file and loopback HTTP transports require OMNIBOARD_MCP_CLI_ALLOW_LOCAL_TRANSPORTS=true.'
     );
   }
   if (url.username || url.password) {

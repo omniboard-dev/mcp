@@ -6,12 +6,12 @@ import {
 } from '../../interface.js';
 import { reportRunnerAgenticRunProgress } from '../../services/agentic-runs.service.js';
 import { progressReportOutputSchema } from '../output-schemas.js';
-import { McpToolDefinition } from '../shared.js';
+import { McpCliToolDefinition } from '../shared.js';
 
-export const reportRunnerAgenticRunProgressTool: McpToolDefinition = {
+export const reportRunnerAgenticRunProgressTool: McpCliToolDefinition = {
   name: 'omniboard_runner_report_agentic_run_progress',
   description:
-    'Dedicated runner mode: report progress for an explicit run and project without resolving the MCP process working directory.',
+    'Dedicated runner mode: report progress for an explicit run and project without resolving the MCP CLI process working directory.',
   inputSchema: {
     runKey: z.string().min(1),
     projectName: z.string().min(1),

@@ -3,9 +3,9 @@ import { z } from 'zod';
 import { AGENTIC_RUN_PROGRESS_STATUS_VALUES } from '../../interface.js';
 import { listAgenticRunProjects } from '../../services/agentic-runs.service.js';
 import { matchedProjectsOutputSchema } from '../output-schemas.js';
-import { McpToolDefinition } from '../shared.js';
+import { McpCliToolDefinition } from '../shared.js';
 
-export const listAgenticRunProjectsTool: McpToolDefinition = {
+export const listAgenticRunProjectsTool: McpCliToolDefinition = {
   name: 'omniboard_runner_list_agentic_run_projects',
   description:
     'Dedicated runner discovery: read stored Omniboard projects and progress without refreshing providers, preparing workspaces, or changing agentic-run state. Use this agentic-state side-effect-free listing to select candidates and inspect results; provider status may be stale until a selected project is prepared. After preparation refreshes selected projects, list again only when an updated overview is needed.',

@@ -77,7 +77,7 @@ try {
     return jsonResponse(execution);
   }) as typeof fetch;
 
-  process.env.OMNIBOARD_API_KEY_MCP = 'lease-test-key';
+  process.env.OMNIBOARD_API_KEY_MCP_CLI = 'lease-test-key';
   process.env.OMNIBOARD_API_URL = 'http://runner.test';
 
   const {
@@ -142,7 +142,7 @@ try {
   await trigger(rejectedTimer);
   await assert.rejects(
     checkpointRunnerExecution(rejected, { phase: 'preparing' }),
-    /is not leased by this MCP process/
+    /is not leased by this MCP CLI process/
   );
   assert.equal(rejectedTimer.cleared, true);
 
@@ -154,7 +154,7 @@ try {
   now = confirmedExpiry;
   await assert.rejects(
     checkpointRunnerExecution(expired, { phase: 'preparing' }),
-    /is not leased by this MCP process/
+    /is not leased by this MCP CLI process/
   );
   assert.equal(expiredTimer.cleared, true);
 

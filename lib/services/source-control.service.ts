@@ -1,7 +1,4 @@
-import {
-  AgenticRunProviderSnapshot,
-  McpRepositoryAccess,
-} from '../interface.js';
+import { AgenticRunProviderSnapshot, RepositoryAccess } from '../interface.js';
 import {
   createBitbucketPullRequest,
   getBitbucketPullRequestDetails,
@@ -44,7 +41,7 @@ export interface SourceControlRebaseRequestResult {
 }
 
 export async function validateRepositoryAccess(
-  access: McpRepositoryAccess,
+  access: RepositoryAccess,
   repositoryUrl: string
 ) {
   switch (access.provider) {
@@ -58,7 +55,7 @@ export async function validateRepositoryAccess(
 }
 
 export async function createChangeRequest(
-  access: McpRepositoryAccess,
+  access: RepositoryAccess,
   repositoryId: string,
   sourceBranch: string,
   targetBranch: string,
@@ -90,7 +87,7 @@ export async function createChangeRequest(
 }
 
 export function getChangeRequestDetails(
-  access: McpRepositoryAccess,
+  access: RepositoryAccess,
   repositoryId: string,
   mergeRequestUrl: string
 ): Promise<SourceControlChangeRequestDetails> {
@@ -111,7 +108,7 @@ export function getChangeRequestDetails(
 }
 
 export function requestChangeRequestRebase(
-  access: McpRepositoryAccess,
+  access: RepositoryAccess,
   repositoryId: string,
   mergeRequestUrl: string
 ): Promise<SourceControlRebaseRequestResult> {
@@ -141,7 +138,7 @@ function normalizeChangeRequestDescription(description?: string) {
 }
 
 export async function retryFailedPipeline(
-  access: McpRepositoryAccess,
+  access: RepositoryAccess,
   repositoryUrl: string,
   pipelineUrl: string
 ) {
@@ -160,13 +157,13 @@ export async function retryFailedPipeline(
   }
 }
 
-export function resolveGitUsername(access: McpRepositoryAccess) {
+export function resolveGitUsername(access: RepositoryAccess) {
   return access.provider === 'bitbucket_data_center'
     ? access.username
     : 'oauth2';
 }
 
-export function providerLabel(access: McpRepositoryAccess) {
+export function providerLabel(access: RepositoryAccess) {
   return access.provider === 'bitbucket_data_center'
     ? 'Bitbucket Data Center'
     : 'GitLab';

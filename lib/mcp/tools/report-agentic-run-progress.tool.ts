@@ -6,9 +6,9 @@ import {
 } from '../../interface.js';
 import { reportAgenticRunProgress } from '../../services/agentic-runs.service.js';
 import { progressReportOutputSchema } from '../output-schemas.js';
-import { McpToolDefinition } from '../shared.js';
+import { McpCliToolDefinition } from '../shared.js';
 
-export const reportAgenticRunProgressTool: McpToolDefinition = {
+export const reportAgenticRunProgressTool: McpCliToolDefinition = {
   name: 'omniboard_local_report_agentic_run_progress',
   description:
     'Developer-local mode: report progress for one Omniboard agentic run using its runKey.',

@@ -1,6 +1,6 @@
 import {
   AgenticRunProjectState,
-  McpRepositoryAccess,
+  RepositoryAccess,
   RunnerWorkspaceState,
 } from '../interface.js';
 import {
@@ -24,7 +24,7 @@ export async function reconcileRunnerWorkspace(
   state: RunnerWorkspaceState,
   localPath: string,
   repositoryUrl: string,
-  access: McpRepositoryAccess,
+  access: RepositoryAccess,
   projectState: AgenticRunProjectState
 ) {
   try {

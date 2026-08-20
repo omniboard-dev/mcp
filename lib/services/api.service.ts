@@ -1,15 +1,15 @@
 import {
-  AGENTIC_CHECK_RUN_PROGRESS_ENDPOINT,
   DEFAULT_API_URL,
-  MCP_CHECKS_ENDPOINT,
-  MCP_RUN_ENDPOINT,
-  MCP_RUNS_ENDPOINT,
-  MCP_MATCHED_PROJECTS_ENDPOINT,
-  MCP_REPOSITORY_ACCESS_ENDPOINT,
-  MCP_RUN_EXECUTIONS_ENDPOINT,
-  MCP_RUN_PROJECT_PROVIDER_SNAPSHOT_ENDPOINT,
-  MCP_RUN_PROJECT_STATE_REFRESH_ENDPOINT,
-  SETTINGS_ENDPOINT,
+  MCP_CLI_CHECKS_ENDPOINT,
+  MCP_CLI_MATCHED_PROJECTS_ENDPOINT,
+  MCP_CLI_PROGRESS_ENDPOINT,
+  MCP_CLI_REPOSITORY_ACCESS_ENDPOINT,
+  MCP_CLI_RUN_ENDPOINT,
+  MCP_CLI_RUN_EXECUTIONS_ENDPOINT,
+  MCP_CLI_RUN_PROJECT_PROVIDER_SNAPSHOT_ENDPOINT,
+  MCP_CLI_RUN_PROJECT_STATE_REFRESH_ENDPOINT,
+  MCP_CLI_RUNS_ENDPOINT,
+  MCP_CLI_SETTINGS_ENDPOINT,
 } from '../consts.js';
 import {
   AgenticRunProgressUpsertInput,
@@ -19,13 +19,13 @@ import {
   AgenticRunResponse,
   AgenticRunsResponse,
   AgenticRunMatchedProjectsResponse,
-  McpApiAgenticRun,
-  McpApiChecksResponse,
-  McpApiMatchedProject,
-  McpApiMatchedProjectsResponse,
-  McpApiProject,
-  McpApiRunResponse,
-  McpRepositoryAccess,
+  McpCliApiAgenticRun,
+  McpCliApiChecksResponse,
+  McpCliApiMatchedProject,
+  McpCliApiMatchedProjectsResponse,
+  McpCliApiProject,
+  McpCliApiRunResponse,
+  RepositoryAccess,
   ProjectInfo,
   Settings,
   RunnerAgenticRunsResponse,
@@ -39,11 +39,11 @@ let apiUrl: string;
 let apiKey: string;
 
 export function createApiService() {
-  const key = process.env.OMNIBOARD_API_KEY_MCP;
+  const key = process.env.OMNIBOARD_API_KEY_MCP_CLI;
 
   if (!key) {
     throw new Error(
-      'OMNIBOARD_API_KEY_MCP environment variable is required to run @omniboard/mcp'
+      'OMNIBOARD_API_KEY_MCP_CLI environment variable is required to run @omniboard/mcp'
     );
   }
 
@@ -54,13 +54,14 @@ export function createApiService() {
 }
 
 export const getSettings = (): Promise<Settings> =>
-  request<Settings>(SETTINGS_ENDPOINT);
+  request<Settings>(MCP_CLI_SETTINGS_ENDPOINT);
 
 export const getRunnerAgenticRuns =
   async (): Promise<RunnerAgenticRunsResponse> => {
-    const response = await request<{ runs: McpApiAgenticRun[]; total: number }>(
-      MCP_RUNS_ENDPOINT
-    );
+    const response = await request<{
+      runs: McpCliApiAgenticRun[];
+      total: number;
+    }>(MCP_CLI_RUNS_ENDPOINT);
     const runs = normalizeAgenticRunsResponse(response.runs ?? []);
     return {
       runs,
@@ -72,11 +73,14 @@ export const getAgenticRuns = async (
   project: ProjectInfo,
   checkName?: string
 ): Promise<AgenticRunsResponse> => {
-  const response = await request<McpApiChecksResponse>(MCP_CHECKS_ENDPOINT, {
-    query: {
-      projectName: project.name,
-    },
-  });
+  const response = await request<McpCliApiChecksResponse>(
+    MCP_CLI_CHECKS_ENDPOINT,
+    {
+      query: {
+        projectName: project.name,
+      },
+    }
+  );
   const projectResponse = normalizeApiProject(response.project, project.name);
   const runs = response.checks
     .filter((check) => !checkName || check.name === checkName)
@@ -102,7 +106,7 @@ export const getAgenticRun = async (
   project: ProjectInfo,
   runKey: string
 ): Promise<AgenticRunResponse> => {
-  const response = await request<McpApiRunResponse>(MCP_RUN_ENDPOINT, {
+  const response = await request<McpCliApiRunResponse>(MCP_CLI_RUN_ENDPOINT, {
     query: {
       projectName: project.name,
       runKey,
@@ -136,8 +140,8 @@ export const getAgenticRunMatchedProjects = async ({
   checkName?: string;
   runKey?: string;
 }): Promise<AgenticRunMatchedProjectsResponse> => {
-  const response = await request<McpApiMatchedProjectsResponse>(
-    MCP_MATCHED_PROJECTS_ENDPOINT,
+  const response = await request<McpCliApiMatchedProjectsResponse>(
+    MCP_CLI_MATCHED_PROJECTS_ENDPOINT,
     {
       query: {
         checkName,
@@ -175,7 +179,7 @@ export const refreshAgenticRunProjectState = (
   runKey: string,
   projectName: string
 ): Promise<AgenticRunProjectState> =>
-  request<AgenticRunProjectState>(MCP_RUN_PROJECT_STATE_REFRESH_ENDPOINT, {
+  request<AgenticRunProjectState>(MCP_CLI_RUN_PROJECT_STATE_REFRESH_ENDPOINT, {
     method: 'POST',
     body: JSON.stringify({ runKey, projectName }),
   });
@@ -185,15 +189,18 @@ export const applyAgenticRunProjectProviderSnapshot = (
   projectName: string,
   snapshot: AgenticRunProviderSnapshot
 ): Promise<AgenticRunProjectState> =>
-  request<AgenticRunProjectState>(MCP_RUN_PROJECT_PROVIDER_SNAPSHOT_ENDPOINT, {
-    method: 'POST',
-    body: JSON.stringify({ runKey, projectName, ...snapshot }),
-  });
+  request<AgenticRunProjectState>(
+    MCP_CLI_RUN_PROJECT_PROVIDER_SNAPSHOT_ENDPOINT,
+    {
+      method: 'POST',
+      body: JSON.stringify({ runKey, projectName, ...snapshot }),
+    }
+  );
 
 export const getRepositoryAccess = (
   repositoryUrl: string
-): Promise<McpRepositoryAccess> =>
-  request<McpRepositoryAccess>(MCP_REPOSITORY_ACCESS_ENDPOINT, {
+): Promise<RepositoryAccess> =>
+  request<RepositoryAccess>(MCP_CLI_REPOSITORY_ACCESS_ENDPOINT, {
     method: 'POST',
     body: JSON.stringify({ repositoryUrl }),
   });
@@ -201,19 +208,16 @@ export const getRepositoryAccess = (
 export const upsertAgenticRunProgress = (
   progress: AgenticRunProgressUpsertInput
 ): Promise<AgenticRunProgressUpsertResponse> =>
-  request<AgenticRunProgressUpsertResponse>(
-    AGENTIC_CHECK_RUN_PROGRESS_ENDPOINT,
-    {
-      method: 'PUT',
-      body: JSON.stringify(progress),
-    }
-  );
+  request<AgenticRunProgressUpsertResponse>(MCP_CLI_PROGRESS_ENDPOINT, {
+    method: 'PUT',
+    body: JSON.stringify(progress),
+  });
 
 export const acquireRunnerExecution = (input: {
   runKey: string;
   projectName: string;
   repositoryUrl: string;
-  sourceControlProvider: McpRepositoryAccess['provider'];
+  sourceControlProvider: RepositoryAccess['provider'];
   sourceControlRepositoryId: string;
   branch: string;
   commitMessage?: string | null;
@@ -221,7 +225,7 @@ export const acquireRunnerExecution = (input: {
   leaseToken?: string;
 }): Promise<RunnerExecutionLeaseResponse> =>
   request<RunnerExecutionLeaseResponse>(
-    MCP_RUN_EXECUTIONS_ENDPOINT + '/acquire',
+    MCP_CLI_RUN_EXECUTIONS_ENDPOINT + '/acquire',
     { method: 'POST', body: JSON.stringify(input) }
   );
 
@@ -230,7 +234,7 @@ export const renewRunnerExecution = (
   leaseToken: string
 ): Promise<RunnerExecutionLeaseResponse> =>
   request<RunnerExecutionLeaseResponse>(
-    MCP_RUN_EXECUTIONS_ENDPOINT +
+    MCP_CLI_RUN_EXECUTIONS_ENDPOINT +
       '/' +
       encodeURIComponent(executionKey) +
       '/renew',
@@ -251,7 +255,7 @@ export const checkpointRunnerExecution = (
   }
 ): Promise<RunnerExecution> =>
   request<RunnerExecution>(
-    MCP_RUN_EXECUTIONS_ENDPOINT +
+    MCP_CLI_RUN_EXECUTIONS_ENDPOINT +
       '/' +
       encodeURIComponent(executionKey) +
       '/checkpoint',
@@ -263,7 +267,7 @@ export const reinitializeRunnerExecution = (
   input: { leaseToken: string; expectedStateVersion: number }
 ): Promise<RunnerExecution> =>
   request<RunnerExecution>(
-    MCP_RUN_EXECUTIONS_ENDPOINT +
+    MCP_CLI_RUN_EXECUTIONS_ENDPOINT +
       '/' +
       encodeURIComponent(executionKey) +
       '/reinitialize',
@@ -276,7 +280,7 @@ export const completeRunnerExecutionByIdentity = (input: {
   phase: 'completed' | 'abandoned';
 }): Promise<{ completed: boolean; execution: RunnerExecution | null }> =>
   request<{ completed: boolean; execution: RunnerExecution | null }>(
-    MCP_RUN_EXECUTIONS_ENDPOINT + '/complete-by-identity',
+    MCP_CLI_RUN_EXECUTIONS_ENDPOINT + '/complete-by-identity',
     { method: 'POST', body: JSON.stringify(input) }
   );
 
@@ -289,7 +293,7 @@ export const completeRunnerExecution = (
   }
 ): Promise<RunnerExecution> =>
   request<RunnerExecution>(
-    MCP_RUN_EXECUTIONS_ENDPOINT +
+    MCP_CLI_RUN_EXECUTIONS_ENDPOINT +
       '/' +
       encodeURIComponent(executionKey) +
       '/complete',
@@ -301,7 +305,7 @@ export const releaseRunnerExecution = (
   leaseToken: string
 ): Promise<RunnerExecution> =>
   request<RunnerExecution>(
-    MCP_RUN_EXECUTIONS_ENDPOINT +
+    MCP_CLI_RUN_EXECUTIONS_ENDPOINT +
       '/' +
       encodeURIComponent(executionKey) +
       '/release',
@@ -361,7 +365,7 @@ async function request<T>(
 }
 
 function normalizeAgenticRunsResponse(
-  response: McpApiAgenticRun[],
+  response: McpCliApiAgenticRun[],
   fallbackCheckName = ''
 ) {
   return response
@@ -370,7 +374,7 @@ function normalizeAgenticRunsResponse(
 }
 
 function normalizeAgenticRunSummary(
-  run: McpApiAgenticRun,
+  run: McpCliApiAgenticRun,
   fallbackCheckName: string
 ) {
   const runKey = normalizeString(run.runKey ?? run.key ?? run.id);
@@ -414,9 +418,9 @@ function normalizeString(value: unknown) {
 }
 
 function normalizeApiProject(
-  project: Partial<McpApiProject> | undefined,
+  project: Partial<McpCliApiProject> | undefined,
   fallbackName: string
-): McpApiProject {
+): McpCliApiProject {
   return {
     id: project?.id ?? 0,
     name: project?.name ?? fallbackName,
@@ -425,8 +429,8 @@ function normalizeApiProject(
 }
 
 function normalizeMatchedProject(
-  project: McpApiMatchedProject
-): McpApiMatchedProject {
+  project: McpCliApiMatchedProject
+): McpCliApiMatchedProject {
   return {
     id: project.id,
     name: project.name,

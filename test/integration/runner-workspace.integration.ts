@@ -103,7 +103,7 @@ try {
 
     if (
       request.method === 'POST' &&
-      url.pathname === '/mcp/run-executions/acquire'
+      url.pathname === '/mcp-cli/run-executions/acquire'
     ) {
       let execution = state.runnerExecution;
       if (!execution) {
@@ -138,7 +138,7 @@ try {
       ) {
         response.statusCode = 409;
         return send(response, {
-          message: 'Runner execution is leased by another MCP process',
+          message: 'Runner execution is leased by another MCP CLI process',
         });
       }
       state.runnerLeaseToken = body.leaseToken ?? 'a'.repeat(64);
@@ -152,7 +152,7 @@ try {
     }
 
     const runnerExecutionMatch =
-      /^\/mcp\/run-executions\/([^/]+)\/(renew|checkpoint|reinitialize|complete|release)$/.exec(
+      /^\/mcp-cli\/run-executions\/([^/]+)\/(renew|checkpoint|reinitialize|complete|release)$/.exec(
         url.pathname
       );
     if (runnerExecutionMatch && state.runnerExecution) {
@@ -232,7 +232,7 @@ try {
 
     if (
       request.method === 'POST' &&
-      url.pathname === '/mcp/run-executions/complete-by-identity'
+      url.pathname === '/mcp-cli/run-executions/complete-by-identity'
     ) {
       const execution = state.runnerExecution;
       state.runnerCompletionByIdentityPhases.push(body.phase);
@@ -248,13 +248,13 @@ try {
       return send(response, { completed: true, execution });
     }
 
-    if (request.method === 'GET' && url.pathname === '/settings/cli') {
+    if (request.method === 'GET' && url.pathname === '/mcp-cli/settings') {
       return send(response, {});
     }
 
     if (
       request.method === 'POST' &&
-      url.pathname === '/mcp/run-project-state/refresh'
+      url.pathname === '/mcp-cli/run-project-state/refresh'
     ) {
       assert.equal(body.runKey, 'run-icons');
       assert.equal(body.projectName, 'project-a');
@@ -311,7 +311,7 @@ try {
 
     if (
       request.method === 'POST' &&
-      url.pathname === '/mcp/run-project-state/provider-snapshot'
+      url.pathname === '/mcp-cli/run-project-state/provider-snapshot'
     ) {
       state.bitbucketProviderSnapshotCount += 1;
       assert.equal(body.runKey, 'run-icons');
@@ -373,7 +373,10 @@ try {
       });
     }
 
-    if (request.method === 'GET' && url.pathname === '/mcp/matched-projects') {
+    if (
+      request.method === 'GET' &&
+      url.pathname === '/mcp-cli/matched-projects'
+    ) {
       state.matchedProjectsLookupCount += 1;
       return send(response, {
         check: { name: 'icon-registry', type: 'regex', agentic: true },
@@ -407,7 +410,7 @@ try {
       });
     }
 
-    if (request.method === 'GET' && url.pathname === '/mcp/run') {
+    if (request.method === 'GET' && url.pathname === '/mcp-cli/run') {
       state.agenticRunLookupCount += 1;
       return send(response, {
         project: { id: 1, name: 'project-a' },
@@ -432,7 +435,7 @@ try {
 
     if (
       request.method === 'POST' &&
-      url.pathname === '/mcp/repository-access'
+      url.pathname === '/mcp-cli/repository-access'
     ) {
       assert(state.projectRepositoryUrls.includes(body.repositoryUrl));
       repositoryAccessRequests.push(body.repositoryUrl);
@@ -458,10 +461,7 @@ try {
       });
     }
 
-    if (
-      request.method === 'PUT' &&
-      url.pathname === '/agentic-check-run-progress'
-    ) {
+    if (request.method === 'PUT' && url.pathname === '/mcp-cli/progress') {
       progress.push(body);
       return send(response, { changed: true, row: body });
     }
@@ -724,11 +724,11 @@ try {
   );
 
   try {
-    process.env.OMNIBOARD_API_KEY_MCP = 'test-mcp-key';
+    process.env.OMNIBOARD_API_KEY_MCP_CLI = 'test-mcp-key';
     process.env.OMNIBOARD_API_KEY = 'test-analyzer-key';
     process.env.OMNIBOARD_API_URL = `http://127.0.0.1:${getServerPort(server)}`;
     process.env.UNRELATED_RUNNER_SECRET = 'ambient-secret';
-    delete process.env.OMNIBOARD_MCP_ALLOW_LOCAL_TRANSPORTS;
+    delete process.env.OMNIBOARD_MCP_CLI_ALLOW_LOCAL_TRANSPORTS;
     const {
       prepareRunnerWorkspace,
       finalizeRunnerWorkspace,

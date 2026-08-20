@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import os from 'node:os';
 
 import {
-  McpRepositoryAccess,
+  RepositoryAccess,
   RunnerExecution,
   RunnerExecutionPhase,
   RunnerWorkspaceState,
@@ -11,7 +11,7 @@ import * as api from './api.service.js';
 
 const LEASE_RENEWAL_INTERVAL_MS = 60_000;
 const RUNNER_EXECUTION_LEASE_CONFLICT_MESSAGE =
-  'Runner execution is leased by another MCP process';
+  'Runner execution is leased by another MCP CLI process';
 const leaseOwner = `${os.hostname().slice(0, 48)}:${
   process.pid
 }:${randomUUID()}`;
@@ -31,7 +31,7 @@ export interface AcquireRunnerExecutionInput {
   runKey: string;
   projectName: string;
   repositoryUrl: string;
-  sourceControlProvider: McpRepositoryAccess['provider'];
+  sourceControlProvider: RepositoryAccess['provider'];
   sourceControlRepositoryId: string;
   branch: string;
   commitMessage?: string | null;
@@ -194,7 +194,7 @@ export function hasActiveRunnerExecutionLease(
 export function createRunnerWorkspaceState(
   execution: RunnerExecution,
   localPath: string,
-  access: McpRepositoryAccess
+  access: RepositoryAccess
 ): RunnerWorkspaceState {
   if (!execution.targetBranch || !execution.preparedHeadSha) {
     throw new Error(
@@ -283,7 +283,7 @@ function requireLease(executionKey: string) {
   const lease = getActiveLease(executionKey);
   if (!lease) {
     throw new Error(
-      `Runner execution "${executionKey}" is not leased by this MCP process.`
+      `Runner execution "${executionKey}" is not leased by this MCP CLI process.`
     );
   }
   return lease;

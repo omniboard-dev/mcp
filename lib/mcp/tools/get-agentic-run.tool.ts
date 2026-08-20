@@ -2,9 +2,9 @@ import { z } from 'zod';
 
 import { getAgenticRun } from '../../services/agentic-runs.service.js';
 import { agenticRunOutputSchema } from '../output-schemas.js';
-import { McpToolDefinition } from '../shared.js';
+import { McpCliToolDefinition } from '../shared.js';
 
-export const getAgenticRunTool: McpToolDefinition = {
+export const getAgenticRunTool: McpCliToolDefinition = {
   name: 'omniboard_local_get_agentic_run',
   description:
     'Developer-local mode: get one Omniboard agentic run by runKey, including prompt, progress, and agent instructions.',

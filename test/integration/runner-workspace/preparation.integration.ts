@@ -138,7 +138,7 @@ export async function runWorkspacePreparationIntegration(context: any) {
       runKey: 'run-icons',
       projectName: 'project-a',
     }),
-    /Runner execution is leased by another MCP process/
+    /Runner execution is leased by another MCP CLI process/
   );
   assert.equal(progress.length, progressBeforeLeaseConflict);
   state.runnerExecution = null;
@@ -312,7 +312,7 @@ export async function runWorkspacePreparationIntegration(context: any) {
   await fs.writeFile(
     path.join(prepared.workspace.localPath, '.git', 'hooks', 'pre-commit'),
     `#!/bin/sh
-  printf "%s|%s" "$OMNIBOARD_API_KEY_MCP" "$OMNIBOARD_API_KEY" > "${serverSecretLeakPath}"
+  printf "%s|%s" "$OMNIBOARD_API_KEY_MCP_CLI" "$OMNIBOARD_API_KEY" > "${serverSecretLeakPath}"
   `,
     { mode: 0o700 }
   );

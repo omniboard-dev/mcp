@@ -490,7 +490,7 @@ function resolveGitlabApiBaseUrl(value: string) {
     )
   ) {
     throw new Error(
-      'GitLab API URLs must use HTTPS. Loopback HTTP requires OMNIBOARD_MCP_ALLOW_LOCAL_TRANSPORTS=true.'
+      'GitLab API URLs must use HTTPS. Loopback HTTP requires OMNIBOARD_MCP_CLI_ALLOW_LOCAL_TRANSPORTS=true.'
     );
   }
   if (url.username || url.password) {

@@ -522,7 +522,7 @@ function resolveBitbucketApiBaseUrl(value: string) {
     )
   ) {
     throw new Error(
-      'Bitbucket Data Center API URLs must use HTTPS. Loopback HTTP requires OMNIBOARD_MCP_ALLOW_LOCAL_TRANSPORTS=true.'
+      'Bitbucket Data Center API URLs must use HTTPS. Loopback HTTP requires OMNIBOARD_MCP_CLI_ALLOW_LOCAL_TRANSPORTS=true.'
     );
   }
   if (url.username || url.password) {

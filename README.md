@@ -1,15 +1,26 @@
-# Omniboard.dev MCP
+# Omniboard MCP CLI
 
-MCP server that exposes Omniboard agentic check runs to coding agents.
+Omniboard MCP CLI is a local stdio MCP server that exposes agentic check runs
+to coding agents. It calls the independently reusable
+Agentic Runner workflow through the Omniboard API's `/mcp-cli` endpoints.
+
+This package is separate from the MCP Hosted server exposed directly by the
+Omniboard API at `/mcp-hosted`. MCP Hosted uses bearer authentication and scoped
+`mcp-hosted` API keys; this package uses a full-access `mcp-cli` API key.
+
+In this document, **MCP Hosted** and **MCP CLI** name the two Omniboard
+integrations. A **coding client** is the external MCP host, such as Codex, Claude
+Code, or Cursor; protocol terms such as stdio and `structuredContent` describe
+the transport and wire format rather than another Omniboard component.
 
 One agentic run consists of one prompt and its tracked progress. Tools identify a
 run with its `runKey`.
 
 ## Environment
 
-`OMNIBOARD_API_KEY_MCP` is required and should be passed through the MCP client
-configuration. The server uses it to read agentic runs, retrieve repository
-access when required, and report run progress.
+`OMNIBOARD_API_KEY_MCP_CLI` is required and should be passed through the coding
+client's MCP server configuration. MCP CLI uses it to read agentic runs,
+retrieve repository access when required, and report run progress.
 
 ### Optional
 
@@ -17,17 +28,17 @@ access when required, and report run progress.
   `https://api.omniboard.dev`.
 - `OMNIBOARD_API_KEY`: enables analyzer validation in developer-local mode.
   Omit it when connected agents should not run `@omniboard/analyzer`.
-- `OMNIBOARD_MCP_ALLOW_LOCAL_TRANSPORTS=true`: permits local `file:`
+- `OMNIBOARD_MCP_CLI_ALLOW_LOCAL_TRANSPORTS=true`: permits local `file:`
   repositories and loopback HTTP Git/GitLab endpoints for isolated local tests.
   Leave it unset in normal runner deployments.
 
-## Registering the MCP server
+## Registering the MCP CLI server
 
-The server uses the standard MCP stdio transport. Instantiate it only in projects
-that use Omniboard MCP. Do not add it to a user-level or global configuration:
-coding harnesses may start the server for every project, wasting resources and
-exposing irrelevant tools. Keep the API key in the harness-specific project or
-local configuration and do not commit it.
+The server uses the stdio transport defined by MCP. Instantiate it only in
+projects that use Omniboard MCP CLI. Do not add it to a user-level or global
+configuration: coding harnesses may start the server for every project, wasting
+resources and exposing irrelevant tools. Keep the API key in the
+harness-specific project or local configuration and do not commit it.
 
 ### Claude Code
 
@@ -36,7 +47,7 @@ MCP configuration](https://code.claude.com/docs/en/mcp) for scope and management
 options.
 
 ```sh
-claude mcp add --env OMNIBOARD_API_KEY_MCP=your-api-key --scope local omniboard -- npx -y @omniboard/mcp
+claude mcp add --env OMNIBOARD_API_KEY_MCP_CLI=your-api-key --scope local omniboard -- npx -y @omniboard/mcp
 ```
 
 ### Cursor
@@ -51,7 +62,7 @@ project and global configuration locations.
     "omniboard": {
       "command": "npx",
       "args": ["-y", "@omniboard/mcp"],
-      "env": { "OMNIBOARD_API_KEY_MCP": "your-api-key" }
+      "env": { "OMNIBOARD_API_KEY_MCP_CLI": "your-api-key" }
     }
   }
 }
@@ -69,7 +80,7 @@ command = "npx"
 args = ["-y", "@omniboard/mcp"]
 
 [mcp_servers.omniboard.env]
-OMNIBOARD_API_KEY_MCP = "your-api-key"
+OMNIBOARD_API_KEY_MCP_CLI = "your-api-key"
 ```
 
 ## Developer-local mode
@@ -154,9 +165,9 @@ If the continuation decision does not permit validation, the tool returns
 Dedicated runner mode is for a consumer-operated automation process that handles
 agentic work across projects. A scheduler, queue worker, CI job, cron process, or
 similar coordinator selects runs and projects. Scheduling and concurrency stay
-outside the MCP server.
+outside the MCP CLI server.
 
-The MCP server prepares and finalizes runner-owned checkouts. Before preparation,
+The MCP CLI server prepares and finalizes runner-owned checkouts. Before preparation,
 it refreshes the selected run and project against its Git provider and decides
 whether to continue from the canonical Omniboard progress status and provider
 metadata. The connected coding agent performs the requested code change inside
@@ -165,7 +176,7 @@ finalization.
 
 ### Workspace layout
 
-The MCP process working directory is the root of the consumer's automation
+The MCP CLI process working directory is the root of the consumer's automation
 project. On first preparation, the server creates:
 
 ```text
@@ -185,10 +196,10 @@ Execution state is handled as follows:
 
 - The Omniboard API stores prepared and committed SHAs, branch and repository
   identity, recovery metadata, lifecycle phase, and optimistic state version.
-- MCP does not write accompanying JSON state.
+- MCP CLI does not write accompanying JSON state.
 - Repository credentials and local filesystem paths are never stored in
   execution state.
-- The execution has a short renewable lease. Its token exists only in MCP
+- The execution has a short renewable lease. Its token exists only in MCP CLI
   process memory; the API stores only its hash.
 - DB execution state is authoritative, and runner checkouts are disposable
   local working copies.
@@ -201,7 +212,7 @@ Execution state is handled as follows:
 Finalization resolves Git commit identity in this order:
 
 1. The generated checkout's repository-local `user.name` and `user.email`.
-2. The global Git configuration for the operating-system user that runs MCP.
+2. The global Git configuration for the operating-system user that runs MCP CLI.
 
 Generated checkouts do not inherit repository-local Git configuration from the
 automation project that contains `.omniboard/`.
@@ -214,8 +225,8 @@ git config --global user.email "tomas@example.com"
 ```
 
 CI jobs commonly start with a clean home directory, so configure the identity
-before starting MCP. Run the configuration as the same user and with the same
-`HOME` as the MCP process:
+before starting MCP CLI. Run the configuration as the same user and with the same
+`HOME` as the MCP CLI process:
 
 ```sh
 git config --global user.name "Omniboard Automation"
@@ -225,12 +236,12 @@ git config --global --get user.email
 ```
 
 If neither checkout-local nor global identity is available, Git rejects the
-commit and workspace finalization fails. MCP does not accept author-name or
+commit and workspace finalization fails. MCP CLI does not accept author-name or
 author-email tool inputs and does not provide a hard-coded fallback identity.
 
 #### GitLab CI
 
-Configure a bot identity in `before_script` before the command that starts MCP:
+Configure a bot identity in `before_script` before the command that starts MCP CLI:
 
 ```yaml
 variables:
@@ -248,10 +259,10 @@ identity should not be repeated in the pipeline file.
 
 #### GitHub Actions
 
-Add an identity configuration step before the step that starts MCP:
+Add an identity configuration step before the step that starts MCP CLI:
 
 ```yaml
-- name: Configure Git identity for Omniboard MCP
+- name: Configure Git identity for Omniboard MCP CLI
   shell: bash
   run: |
     git config --global user.name "Omniboard Automation"
@@ -285,19 +296,19 @@ when the same automation identity is shared by multiple workflows.
 
 ### Repository access and safety
 
-MCP applies repository safeguards in this order:
+MCP CLI applies repository safeguards in this order:
 
 1. Preparation performs a read-only GitLab permission preflight before creating
    a workspace. It verifies project visibility, repository and merge request
    availability, archive state, and effective push and merge request
    permissions.
-2. MCP retrieves repository access only for credentialed Git operations.
+2. MCP CLI retrieves repository access only for credentialed Git operations.
    Repository and GitLab API URLs must use HTTPS by default. Local `file:`
    repositories and loopback HTTP endpoints require the explicit local-test
    setting described above.
-3. MCP supplies credentials through a temporary Git askpass helper. Credentials
+3. MCP CLI supplies credentials through a temporary Git askpass helper. Credentials
    are never embedded in clone URLs, written to DB execution state, or returned
-   from MCP tools.
+   from MCP CLI tools.
 4. Finalization retrieves fresh repository access, validates the effective
    repository and workspace paths, disables repository-controlled credential
    helpers and Git hooks, and pushes to the validated repository URL rather than
@@ -308,21 +319,21 @@ preflight.
 
 ### Tools
 
-Every tool declares an output schema and returns the same JSON object in both
-MCP `structuredContent` and a JSON text content block. New clients can consume
-and validate `structuredContent` directly. Existing clients that parse the text
-block remain compatible.
+Every MCP CLI tool declares an output schema and returns the same JSON object in
+both the MCP protocol's `structuredContent` and a JSON text content block. New
+clients can consume and validate `structuredContent` directly. Existing clients
+that parse the text block remain compatible.
 
 #### `omniboard_runner_list_agentic_runs`
 
-Lists every active agentic run available to the MCP key. Use it when an external
+Lists every active agentic run available to the MCP CLI key. Use it when an external
 scheduler has not already selected a run.
 
 #### `omniboard_runner_list_agentic_run_projects`
 
 Lists Omniboard projects matching an agentic check or run. Pass `runKey` to
 target one run, or `checkName` to discover matching projects and active runs
-for a check. This operation does not resolve the MCP process working directory
+for a check. This operation does not resolve the MCP CLI process working directory
 or report progress.
 
 Available query controls are:
@@ -371,12 +382,12 @@ Batch controls are:
 
 Candidates are ordered smallest-first:
 
-1. MCP uses explicitly supplied relevant source extensions when available.
+1. MCP CLI uses explicitly supplied relevant source extensions when available.
 2. Otherwise, it derives extensions from prompt/check text and matched paths.
 3. It prefers the Analyzer-reported line count for the selected extensions.
 4. Relevant file count, total lines, total files, and project name provide
    deterministic tie-breakers.
-5. If no relevant extension can be inferred, MCP ranks by total project size.
+5. If no relevant extension can be inferred, MCP CLI ranks by total project size.
 6. Projects without `projectSize` metadata remain eligible but follow measured
    projects.
 
@@ -384,7 +395,7 @@ Each candidate is refreshed through the normal preparation path and classified:
 
 - Actionable candidates acquire the atomic per-project DB execution lease and
   return a prepared workspace.
-- Candidates already being prepared or holding an active lease in the same MCP
+- Candidates already being prepared or holding an active lease in the same MCP CLI
   process are reported as waiting.
 - Other waiting, stopped, and failed candidates remain in the response while
   scanning continues for actionable work.
@@ -417,7 +428,7 @@ Continuation outcomes include:
 - Merged or otherwise non-actionable work returns without a workspace.
 - Failed application pipelines remain actionable.
 - Infrastructure-only pipeline failures remain non-actionable for code changes.
-- When provider metadata and credentials permit a retry, MCP requests one and
+- When provider metadata and credentials permit a retry, MCP CLI requests one and
   returns `wait` until refreshed provider status becomes actionable.
 
 Branch-name precedence is:
@@ -443,28 +454,28 @@ follows:
 
 1. Preparation uses the provider-refreshed detailed merge status as the recovery
    trigger.
-2. For `need_rebase`, MCP requests a provider-native rebase and returns `wait`.
+2. For `need_rebase`, MCP CLI requests a provider-native rebase and returns `wait`.
    The coordinator prepares the project again after the provider finishes.
-3. If native rebase is unavailable or conflicts exist, MCP fetches the
+3. If native rebase is unavailable or conflicts exist, MCP CLI fetches the
    authoritative source and target branches and starts a local rebase.
-4. MCP reports `blocked` and returns the exact conflict files and resolution
+4. MCP CLI reports `blocked` and returns the exact conflict files and resolution
    instructions.
 5. The coding agent resolves and stages only those files, then calls
    finalization. It must not commit, rebase, or push manually.
 6. If another conflict set appears, finalization returns `completed: false` and
    the caller repeats the resolution and finalization steps.
-7. Once clean, MCP refetches both branches and retries against a newly advanced
+7. Once clean, MCP CLI refetches both branches and retries against a newly advanced
    target up to a bounded limit.
-8. MCP pushes the rebased source with `force-with-lease` bound to the source SHA
+8. MCP CLI pushes the rebased source with `force-with-lease` bound to the source SHA
    where recovery started.
 
 Recovery safeguards are:
 
-- If the source branch advances concurrently, MCP does not push. It resets the
+- If the source branch advances concurrently, MCP CLI does not push. It resets the
   retained workspace to that remote source and requires another preparation.
 - Recovery phase, attempt, source and target SHAs, and conflict files are
   checkpointed after every recoverable transition.
-- Another MCP process can continue from the checkpoint after the previous lease
+- Another MCP CLI process can continue from the checkpoint after the previous lease
   expires.
 
 #### `omniboard_runner_release_agentic_run_workspace`
@@ -473,7 +484,7 @@ Use this tool for every prepared workspace that will not be finalized.
 
 Release behavior is:
 
-- A lease owned by the current MCP process is released.
+- A lease owned by the current MCP CLI process is released.
 - The renewal timer stops immediately.
 - The execution record and local workspace remain available for a later runner.
 - Repeated calls, or calls from a process that does not own the lease, return
@@ -483,7 +494,7 @@ Release behavior is:
 
 #### `omniboard_runner_finalize_agentic_run_workspace`
 
-Before normal finalization or recovery, MCP:
+Before normal finalization or recovery, MCP CLI:
 
 1. Refreshes provider state and applies the same continuation decision used by
    preparation and local execution.
@@ -492,7 +503,7 @@ Before normal finalization or recovery, MCP:
 3. Verifies that the refreshed branch and repository still match the leased DB
    execution and deterministic checkout generation.
 
-After the coding agent applies and verifies a normal change, MCP:
+After the coding agent applies and verifies a normal change, MCP CLI:
 
 1. Creates or resumes the runner commit.
 2. Retrieves fresh repository access and pushes the prepared branch.
@@ -503,7 +514,7 @@ Callers must inspect `completed`:
 
 - `completed: true`: normal finalization or recovery finished successfully.
 - `completed: false`: recovery requires another action or remains blocked. The
-  response provides applicable errors, instructions, and conflict files. MCP
+  response provides applicable errors, instructions, and conflict files. MCP CLI
   does not push when its recovery safety checks fail.
 
 A successful recovery also:
@@ -530,7 +541,7 @@ may still continue. Execution lifecycle outcomes are:
 #### `omniboard_runner_report_agentic_run_progress`
 
 Reports a dedicated-runner milestone for an explicit `runKey` and
-`projectName` without resolving the MCP process working directory as an
+`projectName` without resolving the MCP CLI process working directory as an
 Omniboard project. It supports the same repository, commit, merge request,
 pipeline, verification, error, note, and metadata details as developer-local
 progress reporting, including Markdown in the optional `notes` field.

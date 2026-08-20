@@ -1,7 +1,7 @@
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { McpServer as McpCliSdkServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 
-export interface McpToolDefinition {
+export interface McpCliToolDefinition {
   name: string;
   description: string;
   inputSchema: Record<string, z.ZodTypeAny>;
@@ -9,11 +9,17 @@ export interface McpToolDefinition {
   handler: (args: any) => Promise<unknown> | unknown;
 }
 
-export function registerTool(
-  server: McpServer,
-  { name, description, inputSchema, outputSchema, handler }: McpToolDefinition
+export function registerMcpCliTool(
+  mcpCliServer: McpCliSdkServer,
+  {
+    name,
+    description,
+    inputSchema,
+    outputSchema,
+    handler,
+  }: McpCliToolDefinition
 ) {
-  server.registerTool(
+  mcpCliServer.registerTool(
     name,
     {
       description,
@@ -33,7 +39,7 @@ export function registerTool(
 export function createStructuredToolResult(data: unknown) {
   const text = JSON.stringify(data, null, 2);
   if (text === undefined) {
-    throw new Error('MCP tool result is not JSON serializable.');
+    throw new Error('MCP CLI tool result is not JSON serializable.');
   }
   const structuredContent = JSON.parse(text);
   if (
@@ -41,7 +47,7 @@ export function createStructuredToolResult(data: unknown) {
     typeof structuredContent !== 'object' ||
     Array.isArray(structuredContent)
   ) {
-    throw new Error('MCP tool result must be a JSON object.');
+    throw new Error('MCP CLI tool result must be a JSON object.');
   }
 
   return {

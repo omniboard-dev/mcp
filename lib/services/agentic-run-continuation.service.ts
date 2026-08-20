@@ -168,7 +168,7 @@ export function getAgenticRunContinuationDecision(
         [
           'The canonical progress status "' +
             String(projectState.progress.status) +
-            '" is not supported. Wait for an MCP update.',
+            '" is not supported. Wait for an MCP CLI update.',
         ],
         diagnostics
       );

@@ -1,6 +1,6 @@
 import {
   AgenticRunProgressReportResult,
-  McpRepositoryAccess,
+  RepositoryAccess,
   RunnerWorkspaceFinalizeResult,
   RunnerWorkspaceRebaseRecovery,
   RunnerWorkspaceState,
@@ -393,7 +393,7 @@ export async function prepareRunnerRebaseRecovery(
   state: RunnerWorkspaceState,
   localPath: string,
   repositoryUrl: string,
-  access: McpRepositoryAccess,
+  access: RepositoryAccess,
   changeRequest: SourceControlChangeRequestDetails,
   fallbackDetailedStatus?: string | null,
   providerRebaseFailure?: string
@@ -490,7 +490,7 @@ export async function prepareRunnerRebaseRecovery(
         localPath,
         branch: state.branch,
         notes:
-          'Provider-native rebase was unavailable, so MCP started a local rebase: ' +
+          'Provider-native rebase was unavailable, so MCP CLI started a local rebase: ' +
           providerRebaseFailure,
         metadata: createRecoveryProgressMetadata(recovery),
       }

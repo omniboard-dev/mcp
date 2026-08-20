@@ -307,7 +307,7 @@ export async function reportRunnerAgenticRunProgress(
       executionMode: 'dedicated-runner',
       projectName,
     },
-    lastUpdateSource: 'mcp',
+    lastUpdateSource: 'mcp-cli',
   });
   const response = await api.upsertAgenticRunProgress(payload);
 
@@ -451,7 +451,7 @@ async function createAgenticRunProgressPayload(
       projectType: project.type ?? null,
       projectNames: project.names,
     },
-    lastUpdateSource: 'mcp',
+    lastUpdateSource: 'mcp-cli',
   });
 }
 
