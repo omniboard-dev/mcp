@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.1.28](https://github.com/omniboard-dev/mcp/compare/v0.1.27...v0.1.28) (2026-08-20)
+
+
+### Features
+
+* **runner:** expand project discovery and archive handling ([73a7606](https://github.com/omniboard-dev/mcp/commit/73a76060623692c6fd521dc074bbc3a492dceb7d))
+
 ### [0.1.27](https://github.com/omniboard-dev/mcp/compare/v0.1.26...v0.1.27) (2026-08-20)
 
 ### [0.1.26](https://github.com/omniboard-dev/mcp/compare/v0.1.25...v0.1.26) (2026-08-20)
