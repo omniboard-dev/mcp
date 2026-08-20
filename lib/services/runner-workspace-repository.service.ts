@@ -1,5 +1,4 @@
 import fs from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
 
 import { RepositoryAccess } from '../interface.js';
@@ -15,8 +14,9 @@ export async function withGitCredentials<T>(
   targetDir: string,
   action: (env: NodeJS.ProcessEnv) => Promise<T>
 ) {
+  const askPassParent = await fs.realpath(path.dirname(targetDir));
   const askPassDirectory = await fs.mkdtemp(
-    path.join(os.tmpdir(), 'omniboard-git-')
+    path.join(askPassParent, '.omniboard-git-')
   );
   const askPassPath = path.join(
     askPassDirectory,
@@ -50,6 +50,9 @@ export async function withGitCredentials<T>(
       GIT_TERMINAL_PROMPT: '0',
       OMNIBOARD_GIT_TOKEN: access.token,
       OMNIBOARD_GIT_USERNAME: username,
+      TEMP: askPassDirectory,
+      TMP: askPassDirectory,
+      TMPDIR: askPassDirectory,
     });
   } finally {
     await fs.rm(askPassDirectory, { recursive: true, force: true });

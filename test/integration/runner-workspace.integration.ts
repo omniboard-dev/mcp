@@ -8,6 +8,7 @@ import { promisify } from 'node:util';
 
 import { runAgenticRunIntegration } from './runner-workspace/agentic-run.integration.ts';
 import { runPostMergeRequestContinuationIntegration } from './runner-workspace/continuation.integration.ts';
+import { runWorkspaceCredentialsIntegration } from './runner-workspace/credentials.integration.ts';
 import { runWorkspacePreparationIntegration } from './runner-workspace/preparation.integration.ts';
 import { runWorkspaceRecoveryIntegration } from './runner-workspace/recovery.integration.ts';
 
@@ -773,6 +774,9 @@ try {
     const { writeRunnerState } = await import(
       '../../dist/services/runner-execution.service.js'
     );
+    const { withGitCredentials } = await import(
+      '../../dist/services/runner-workspace-repository.service.js'
+    );
 
     const context = {
       root,
@@ -795,10 +799,12 @@ try {
       finalizeRunnerWorkspace,
       resolveRunnerGitValues,
       writeRunnerState,
+      withGitCredentials,
     };
 
     await runAgenticRunIntegration(context);
     Object.assign(context, await runWorkspacePreparationIntegration(context));
+    await runWorkspaceCredentialsIntegration(context);
     await runWorkspaceRecoveryIntegration(context);
     await runPostMergeRequestContinuationIntegration(context);
 
