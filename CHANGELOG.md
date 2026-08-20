@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.1.25](https://github.com/omniboard-dev/mcp/compare/v0.1.24...v0.1.25) (2026-08-20)
+
+
+### Bug Fixes
+
+* **mcp:** align CLI client with API routes ([a082a4d](https://github.com/omniboard-dev/mcp/commit/a082a4d31e3419efb5abda77efaf6f2345565467))
+* preserve runner Git commit identity ([da9ca45](https://github.com/omniboard-dev/mcp/commit/da9ca457113642609c0060c42af0dee261580230))
+
 ### [0.1.24](https://github.com/omniboard-dev/mcp/compare/v0.1.23...v0.1.24) (2026-08-05)
 
 ### [0.1.23](https://github.com/omniboard-dev/mcp/compare/v0.1.22...v0.1.23) (2026-08-04)
