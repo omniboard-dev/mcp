@@ -2,6 +2,8 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.1.29](https://github.com/omniboard-dev/mcp/compare/v0.1.28...v0.1.29) (2026-08-20)
+
 ### [0.1.28](https://github.com/omniboard-dev/mcp/compare/v0.1.27...v0.1.28) (2026-08-20)
 
 
