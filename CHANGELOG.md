@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.1.26](https://github.com/omniboard-dev/mcp/compare/v0.1.25...v0.1.26) (2026-08-20)
+
+
+### Bug Fixes
+
+* **runner:** inherit git identity and clean up leases ([c81a3dd](https://github.com/omniboard-dev/mcp/commit/c81a3ddc6f1e86812d3ca07057d8fb16bcaa8840))
+
 ### [0.1.25](https://github.com/omniboard-dev/mcp/compare/v0.1.24...v0.1.25) (2026-08-20)
 
 
