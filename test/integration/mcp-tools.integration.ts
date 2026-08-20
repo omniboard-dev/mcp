@@ -14,6 +14,9 @@ const { createAgenticRunProjectList } = await import(
 const { prepareNextRunnerProjects } = await import(
   '../../dist/services/runner-batch-preparation.service.js'
 );
+const { getAgenticRunContinuationDecision } = await import(
+  '../../dist/services/agentic-run-continuation.service.js'
+);
 const { RunnerExecutionLeaseConflictError } = await import(
   '../../dist/services/runner-execution.service.js'
 );
@@ -31,6 +34,30 @@ assert.equal(
   'project-a'
 );
 
+const pendingRetryContinuation = getAgenticRunContinuationDecision({
+  project: { currentlyMatchesCheck: true },
+  progress: {
+    status: 'pending_retry',
+    retryInstructions: [
+      {
+        id: 1,
+        instruction: 'Reuse the existing parser.',
+        requestedFromStatus: 'failed',
+        requestedBy: { id: 7, firstname: 'Tomas', lastname: 'Trajan' },
+        creationDate: '2026-08-20T08:00:00.000Z',
+      },
+    ],
+  },
+  providerSync: { success: true, diagnostics: [] },
+} as any);
+assert.equal(pendingRetryContinuation.action, 'continue');
+assert.equal(pendingRetryContinuation.reason, 'operator_retry_requested');
+assert(
+  pendingRetryContinuation.instructions.some((instruction) =>
+    instruction.includes('Reuse the existing parser.')
+  )
+);
+
 const run = {
   runKey: 'run-icons',
   checkName: 'icon-registry',
@@ -38,6 +65,84 @@ const run = {
   status: 'active',
   isActive: true,
 };
+const retryDiscoveryRequests: any[] = [];
+const unfulfilledRetryProject = project(
+  'project-unfulfilled-retry',
+  'pending_retry',
+  {},
+  'unfulfilled'
+);
+const unfulfilledRetryBatch = await prepareNextRunnerProjects(
+  { runKey: run.runKey, limit: 1 },
+  {
+    listProjects: async (options) => {
+      retryDiscoveryRequests.push(options);
+      return createAgenticRunProjectList(
+        {
+          check: {
+            name: 'icon-registry',
+            type: 'regex',
+            description: null,
+            agentic: true,
+            prompt: 'Large migration prompt',
+          },
+          run,
+          runs: [run],
+          projects: [unfulfilledRetryProject],
+          total: 1,
+          totalsByFulfillment: fulfillmentTotals({ unfulfilled: 1 }),
+        },
+        {
+          statuses: options.statuses,
+          view: options.view,
+        }
+      );
+    },
+    isWorkspacePreparationInProgress: () => false,
+    hasActiveExecutionLease: () => false,
+    prepareWorkspace: async ({ projectName }) => ({
+      run,
+      project: unfulfilledRetryProject,
+      projectState: {
+        run,
+        project: {
+          id: unfulfilledRetryProject.id,
+          name: projectName,
+          currentlyMatchesCheck: false,
+          fulfillment: 'unfulfilled',
+        },
+        progress: unfulfilledRetryProject.progress,
+        providerSync: {
+          attempted: true,
+          success: true,
+          error: null,
+          diagnostics: [],
+        },
+      },
+      continuation: {
+        action: 'stop' as const,
+        reason: 'change_dismissed' as const,
+        instructions: [],
+        diagnostics: [],
+      },
+      prompt: run.prompt,
+      instructions: [],
+    }),
+  }
+);
+assert.equal(retryDiscoveryRequests.length, 1);
+assert.deepEqual(retryDiscoveryRequests[0].statuses, [
+  'pending_retry',
+  'blocked',
+  'failed',
+]);
+assert.equal(unfulfilledRetryBatch.candidatesTotal, 1);
+assert.equal(
+  unfulfilledRetryBatch.results[0].projectName,
+  unfulfilledRetryProject.name
+);
+assert.equal(unfulfilledRetryBatch.results[0].outcome, 'stopped');
+
 const projects = [
   {
     ...project('project-a', 'failed', { error: 'clone failed' }),
@@ -81,7 +186,7 @@ const filteredList = createAgenticRunProjectList(
     runs: [run],
     projects,
     total: projects.length,
-    fulfillment: 'fulfilled',
+    totalsByFulfillment: fulfillmentTotals({ fulfilled: projects.length }),
   },
   {
     statuses: ['failed', 'blocked', 'failed'],
@@ -114,7 +219,7 @@ const batchCandidates = createAgenticRunProjectList(
     runs: [run],
     projects: projects.slice(0, 3),
     total: 3,
-    fulfillment: 'fulfilled',
+    totalsByFulfillment: fulfillmentTotals({ fulfilled: 3 }),
   },
   { statuses: ['failed', 'blocked'] }
 );
@@ -176,7 +281,9 @@ const sizedCandidates = createAgenticRunProjectList(
     runs: [run],
     projects: sizedProjects,
     total: sizedProjects.length,
-    fulfillment: 'fulfilled',
+    totalsByFulfillment: fulfillmentTotals({
+      fulfilled: sizedProjects.length,
+    }),
   },
   { statuses: ['failed'] }
 );
@@ -254,7 +361,9 @@ const multiDotCandidates = createAgenticRunProjectList(
     runs: [run],
     projects: multiDotProjects,
     total: multiDotProjects.length,
-    fulfillment: 'fulfilled',
+    totalsByFulfillment: fulfillmentTotals({
+      fulfilled: multiDotProjects.length,
+    }),
   },
   { statuses: ['failed'] }
 );
@@ -587,9 +696,8 @@ const apiResponse = {
   runs: [run],
   projects,
   total: projects.length,
-  fulfillment: 'fulfilled',
+  totalsByFulfillment: fulfillmentTotals({ fulfilled: projects.length }),
 };
-const requestedFulfillments: Array<string | null> = [];
 const apiServer = http.createServer((request, response) => {
   const url = new URL(request.url, 'http://localhost');
   response.setHeader('Content-Type', 'application/json');
@@ -597,12 +705,25 @@ const apiServer = http.createServer((request, response) => {
     request.method === 'GET' &&
     url.pathname === '/mcp-cli/matched-projects'
   ) {
-    const fulfillment = url.searchParams.get('fulfillment');
-    requestedFulfillments.push(fulfillment);
     response.end(
       JSON.stringify({
         ...apiResponse,
-        fulfillment: fulfillment ?? 'fulfilled',
+        projectGroups: {
+          fulfilled: projects,
+          unfulfilled: [
+            {
+              ...project('project-unfulfilled', 'pending', {}, 'unfulfilled'),
+              value: false,
+            },
+          ],
+          unchecked: [project('project-unchecked', 'pending', {}, 'unchecked')],
+        },
+        total: projects.length + 2,
+        totalsByFulfillment: fulfillmentTotals({
+          fulfilled: projects.length,
+          unfulfilled: 1,
+          unchecked: 1,
+        }),
       })
     );
     return;
@@ -643,13 +764,7 @@ try {
   const projectListTool = tools.find(
     (tool) => tool.name === 'omniboard_runner_list_agentic_run_projects'
   );
-  for (const property of [
-    'fulfillment',
-    'statuses',
-    'offset',
-    'limit',
-    'view',
-  ]) {
+  for (const property of ['statuses', 'offset', 'limit', 'view']) {
     assert(property in projectListTool.inputSchema.properties);
   }
 
@@ -674,11 +789,14 @@ try {
     listedProjects.structuredContent
   );
   assert.equal(listedContent.total, 2);
-  assert.equal(listedContent.unfilteredTotal, 4);
+  assert.equal(listedContent.unfilteredTotal, 6);
   assert.equal(listedContent.returned, 1);
   assert.equal(listedContent.hasMore, true);
   assert.deepEqual(listedContent.statuses, ['failed']);
-  assert.equal(listedContent.fulfillment, 'fulfilled');
+  assert.deepEqual(
+    listedContent.totalsByFulfillment,
+    fulfillmentTotals({ fulfilled: 4, unfulfilled: 1, unchecked: 1 })
+  );
   assert.equal(listedContent.projects[0].name, 'project-a');
   const listedProjectSizeFixture = projects[0];
   assert('projectSize' in listedProjectSizeFixture);
@@ -691,21 +809,23 @@ try {
   assert(!('prompt' in listedContent.check));
   assert.deepEqual(JSON.parse(listedProjects.content[0].text), listedContent);
 
-  const unfulfilledProjects = await client.callTool({
+  const allResultGroups = await client.callTool({
     name: 'omniboard_runner_list_agentic_run_projects',
     arguments: {
       runKey: run.runKey,
-      fulfillment: 'unfulfilled',
-      limit: 1,
       view: 'summary',
     },
   });
-  assert(!unfulfilledProjects.isError);
-  const unfulfilledContent = matchedProjectsOutputSchema.parse(
-    unfulfilledProjects.structuredContent
+  assert(!allResultGroups.isError);
+  const allResultGroupsContent = matchedProjectsOutputSchema.parse(
+    allResultGroups.structuredContent
   );
-  assert.equal(unfulfilledContent.fulfillment, 'unfulfilled');
-  assert(requestedFulfillments.includes('unfulfilled'));
+  assert.deepEqual(
+    new Set(
+      allResultGroupsContent.projects.map(({ fulfillment }) => fulfillment)
+    ),
+    new Set(['fulfilled', 'unfulfilled', 'unchecked'])
+  );
 
   const releasedWorkspace = await client.callTool({
     name: 'omniboard_runner_release_agentic_run_workspace',
@@ -763,12 +883,13 @@ try {
   );
 }
 
-function project(name, status, progress = {}) {
+function project(name, status, progress = {}, fulfillment = 'fulfilled') {
   return {
     id: name.charCodeAt(name.length - 1),
     name,
     value: true,
     result: { large: 'payload' },
+    fulfillment,
     repositoryUrl: `https://gitlab.example.com/group/${name}.git`,
     progress: {
       status,
@@ -827,10 +948,21 @@ function candidatesWithPrompt(prompt, candidateProjects) {
       runs: [run],
       projects: candidateProjects,
       total: candidateProjects.length,
-      fulfillment: 'fulfilled',
+      totalsByFulfillment: fulfillmentTotals({
+        fulfilled: candidateProjects.length,
+      }),
     },
     { statuses: ['failed'] }
   );
+}
+
+function fulfillmentTotals(overrides = {}) {
+  return {
+    fulfilled: 0,
+    unfulfilled: 0,
+    unchecked: 0,
+    ...overrides,
+  };
 }
 
 function batchDependencies(candidates) {

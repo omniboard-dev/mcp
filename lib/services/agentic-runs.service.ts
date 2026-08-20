@@ -3,7 +3,6 @@ import {
   AgenticRunMatchedProject,
   AgenticRunMatchedProjectsListResponse,
   AgenticRunMatchedProjectsResponse,
-  AgenticRunProjectFulfillment,
   AgenticRunPipelineRetryResult,
   AgenticRunProjectListView,
   AgenticRunProgressReportResult,
@@ -53,7 +52,6 @@ export interface ListAgenticRunProjectsOptions {
   offset?: number;
   limit?: number;
   view?: AgenticRunProjectListView;
-  fulfillment?: AgenticRunProjectFulfillment;
 }
 
 export function listRunnerAgenticRuns(): Promise<RunnerAgenticRunsResponse> {
@@ -73,7 +71,6 @@ export async function listAgenticRunProjects({
   offset = 0,
   limit,
   view = 'full',
-  fulfillment = 'fulfilled',
 }: ListAgenticRunProjectsOptions): Promise<AgenticRunMatchedProjectsListResponse> {
   if (!checkName && !runKey) {
     throw new Error('Either checkName or runKey is required.');
@@ -83,7 +80,6 @@ export async function listAgenticRunProjects({
   const response = await api.getAgenticRunMatchedProjects({
     checkName,
     runKey,
-    fulfillment,
   });
   return createAgenticRunProjectList(response, {
     statuses,
@@ -136,7 +132,7 @@ export function createAgenticRunProjectList(
     hasMore: offset + projects.length < filteredProjects.length,
     view,
     statuses: selectedStatuses,
-    fulfillment: response.fulfillment,
+    totalsByFulfillment: response.totalsByFulfillment,
   };
 }
 
@@ -181,6 +177,7 @@ function summarizeMatchedProject(
     repositoryUrl: project.repositoryUrl ?? null,
     repositoryUrls: project.repositoryUrls ?? [],
     projectSize: project.projectSize ?? null,
+    fulfillment: project.fulfillment,
     progress: progress
       ? {
           status: progress.status,
@@ -197,6 +194,7 @@ function summarizeMatchedProject(
           pipelineFailureSummary: progress.pipelineFailureSummary ?? null,
           providerSyncError: progress.providerSyncError ?? null,
           error: progress.error ?? null,
+          retryInstructions: progress.retryInstructions ?? [],
         }
       : null,
   };

@@ -13,7 +13,11 @@ import {
   prepareRunnerWorkspace,
 } from './runner-workspace-preparation.service.js';
 
-const DEFAULT_STATUSES: AgenticRunProgressStatus[] = ['blocked', 'failed'];
+const DEFAULT_STATUSES: AgenticRunProgressStatus[] = [
+  'pending_retry',
+  'blocked',
+  'failed',
+];
 const DEFAULT_LIMIT = 1;
 const MAX_LIMIT = 10;
 
@@ -104,13 +108,14 @@ export async function prepareNextRunnerProjects(
     statuses,
     view: 'full',
   });
+  const discoveredProjects = discovery.projects;
   const { sourceSelection, projectExtensions } = resolveSourceSelection(
     options.relevantSourceExtensions,
     discovery.run?.prompt ?? discovery.check.prompt,
     discovery.check.description,
-    discovery.projects
+    discoveredProjects
   );
-  const candidates = discovery.projects
+  const candidates = discoveredProjects
     .map((project, index) => ({
       project,
       sizeRanking: createProjectSizeRanking(project, projectExtensions[index]),
@@ -208,7 +213,7 @@ export async function prepareNextRunnerProjects(
     runKey: options.runKey,
     requestedStatuses: statuses,
     requestedLimit: limit,
-    candidatesTotal: discovery.total,
+    candidatesTotal: candidates.length,
     examined: results.length,
     hasMore: nextCandidateIndex < candidates.length,
     sourceSelection,

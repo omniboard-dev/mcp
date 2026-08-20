@@ -89,9 +89,12 @@ export interface McpCliApiMatchedProjectsResponse {
   check: McpCliApiCheck;
   run: McpCliApiAgenticRun | null;
   runs: McpCliApiAgenticRun[];
-  projects: McpCliApiMatchedProject[];
+  projectGroups: Record<
+    AgenticRunProjectFulfillment,
+    McpCliApiMatchedProject[]
+  >;
   total: number;
-  fulfillment?: AgenticRunProjectFulfillment;
+  totalsByFulfillment: Record<AgenticRunProjectFulfillment, number>;
 }
 
 export interface McpCliApiAgenticRun {
@@ -177,6 +180,7 @@ export interface AgenticRunMatchedProject {
   repositoryUrls?: string[];
   projectSize?: ProjectSize | null;
   progress?: AgenticRunProjectProgress | null;
+  fulfillment: AgenticRunProjectFulfillment;
 }
 
 export interface AgenticRunMatchedProjectsResponse {
@@ -185,7 +189,7 @@ export interface AgenticRunMatchedProjectsResponse {
   runs: AgenticRunSummary[];
   projects: AgenticRunMatchedProject[];
   total: number;
-  fulfillment: AgenticRunProjectFulfillment;
+  totalsByFulfillment: Record<AgenticRunProjectFulfillment, number>;
 }
 
 export type AgenticRunProjectListView = 'full' | 'summary';
@@ -193,6 +197,7 @@ export type AgenticRunProjectListView = 'full' | 'summary';
 export const AGENTIC_RUN_PROJECT_FULFILLMENT_VALUES = [
   'fulfilled',
   'unfulfilled',
+  'unchecked',
 ] as const;
 
 export type AgenticRunProjectFulfillment =
@@ -211,7 +216,6 @@ export interface AgenticRunMatchedProjectsListResponse
   hasMore: boolean;
   view: AgenticRunProjectListView;
   statuses: AgenticRunProgressStatus[];
-  fulfillment: AgenticRunProjectFulfillment;
 }
 
 export interface AgenticRunSummary {
@@ -243,6 +247,7 @@ export type AgenticRunStatus = (typeof AGENTIC_RUN_STATUS_VALUES)[number];
 
 export const AGENTIC_RUN_PROGRESS_STATUS_VALUES = [
   'pending',
+  'pending_retry',
   'in_progress',
   'implemented',
   'needs_input',
@@ -259,6 +264,21 @@ export const AGENTIC_RUN_PROGRESS_STATUS_VALUES = [
 
 export type AgenticRunProgressStatus =
   (typeof AGENTIC_RUN_PROGRESS_STATUS_VALUES)[number];
+
+export const AGENTIC_RUN_REPORTABLE_PROGRESS_STATUS_VALUES = [
+  'pending',
+  'in_progress',
+  'implemented',
+  'needs_input',
+  'verified',
+  'committed',
+  'pushed',
+  'mr_created',
+  'done',
+  'merged',
+  'blocked',
+  'failed',
+] as const satisfies readonly AgenticRunProgressStatus[];
 
 export const AGENTIC_RUN_RESOLUTION_VALUES = ['merged', 'dismissed'] as const;
 
@@ -303,7 +323,20 @@ export interface AgenticRunProjectProgress {
   pipelineUrl?: string | null;
   pipelineFailureSummary?: string | null;
   providerSyncError?: string | null;
+  retryInstructions?: AgenticRunRetryInstruction[];
   [key: string]: unknown;
+}
+
+export interface AgenticRunRetryInstruction {
+  id: number;
+  instruction: string;
+  requestedFromStatus: AgenticRunProgressStatus;
+  requestedBy?: {
+    id: number;
+    firstname: string;
+    lastname: string;
+  } | null;
+  creationDate: string;
 }
 
 export interface AgenticRunProjectState {
@@ -312,6 +345,7 @@ export interface AgenticRunProjectState {
     id: number;
     name: string;
     currentlyMatchesCheck: boolean;
+    fulfillment: AgenticRunProjectFulfillment;
     repositoryUrl?: string | null;
     repositoryUrls?: string[];
   };
@@ -336,7 +370,7 @@ export type AgenticRunContinuationReason =
   | 'change_dismissed'
   | 'change_merged'
   | 'infrastructure_pipeline_failure'
-  | 'project_no_longer_matches'
+  | 'operator_retry_requested'
   | 'provider_sync_failed'
   | 'retry_failed_work'
   | 'unsupported_progress_status'

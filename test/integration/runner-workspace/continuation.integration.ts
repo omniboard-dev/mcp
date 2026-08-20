@@ -278,15 +278,14 @@ export async function runPostMergeRequestContinuationIntegration(context: any) {
   const runLookupCountBeforeNoMatch = state.agenticRunLookupCount;
   const progressCountBeforeNoMatch = progress.length;
   state.projectMatchesCheck = false;
+  state.projectFulfillment = 'unfulfilled';
   const localNoMatchRun = await getAgenticRun('run-icons');
   assert.equal(localNoMatchRun.continuation.action, 'stop');
-  assert.equal(
-    localNoMatchRun.continuation.reason,
-    'project_no_longer_matches'
-  );
+  assert.equal(localNoMatchRun.continuation.reason, 'change_merged');
   assert.equal(state.agenticRunLookupCount, runLookupCountBeforeNoMatch);
   assert.equal(progress.length, progressCountBeforeNoMatch);
   state.projectMatchesCheck = true;
+  state.projectFulfillment = 'fulfilled';
 
   await assert.rejects(fs.access(tokenLeakPath));
   await assert.rejects(fs.access(serverSecretLeakPath));
@@ -306,4 +305,35 @@ export async function runPostMergeRequestContinuationIntegration(context: any) {
     { cwd: remotePath }
   );
   assert.match(stdout, /^[a-f0-9]{40}/);
+
+  state.projectMatchesCheck = false;
+  state.projectFulfillment = 'unfulfilled';
+  state.projectProgressStatus = 'pending_retry';
+  state.projectProgressResolution = null;
+  state.projectRetryInstructions = [
+    {
+      id: 2,
+      instruction: 'Retry only if the check still matches.',
+      requestedFromStatus: 'failed',
+      requestedBy: { id: 7, firstname: 'Tomas', lastname: 'Trajan' },
+      creationDate: '2026-08-20T09:00:00.000Z',
+    },
+  ];
+  const progressCountBeforeUnfulfilledRetry = progress.length;
+  const unfulfilledRetry = await prepareRunnerWorkspace({
+    runKey: 'run-icons',
+    projectName: 'project-a',
+  });
+  assert(unfulfilledRetry.workspace);
+  assert.equal(
+    unfulfilledRetry.continuation.reason,
+    'operator_retry_requested'
+  );
+  assert(
+    unfulfilledRetry.instructions.some((instruction) =>
+      instruction.includes('current agentic check result is unfulfilled')
+    )
+  );
+  assert.equal(progress.length, progressCountBeforeUnfulfilledRetry + 1);
+  assert.equal(progress.at(-1).status, 'in_progress');
 }

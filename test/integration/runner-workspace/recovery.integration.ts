@@ -198,6 +198,35 @@ export async function runWorkspaceRecoveryIntegration(context: any) {
     )
   );
 
+  state.projectProgressStatus = 'pending_retry';
+  state.projectRetryInstructions = [
+    {
+      id: 1,
+      instruction:
+        'Keep the target heading and preserve the agentic branch body.',
+      requestedFromStatus: 'blocked',
+      requestedBy: { id: 7, firstname: 'Tomas', lastname: 'Trajan' },
+      creationDate: '2026-08-20T08:00:00.000Z',
+    },
+  ];
+  const guidedConflictPreparation = await prepareRunnerWorkspace({
+    runKey: 'run-icons',
+    projectName: 'project-a',
+  });
+  assert.equal(
+    guidedConflictPreparation.continuation.reason,
+    'operator_retry_requested'
+  );
+  assert(
+    guidedConflictPreparation.instructions.some((instruction) =>
+      instruction.includes(
+        'Keep the target heading and preserve the agentic branch body.'
+      )
+    )
+  );
+  state.projectProgressStatus = 'blocked';
+  state.projectRetryInstructions = [];
+
   const resolveCurrentConflict = async () => {
     await fs.writeFile(
       path.join(prepared.workspace.localPath, 'README.md'),

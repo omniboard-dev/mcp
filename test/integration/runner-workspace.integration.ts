@@ -53,6 +53,7 @@ const state: Record<string, any> = {
   projectArchived: false,
   projectProgressStatus: 'pending',
   projectProgressResolution: null,
+  projectRetryInstructions: [],
   projectProgressBranch: 'agentic/run-icons',
   projectPipelineStatus: null,
   projectPipelineUrl: null,
@@ -63,12 +64,25 @@ const state: Record<string, any> = {
   projectMergeRequestState: null,
   projectMergeRequestDetailedStatus: null,
   projectMatchesCheck: true,
+  projectFulfillment: 'fulfilled',
   providerSyncSuccess: true,
   runnerExecution: null,
   runnerLeaseToken: null,
   recoveryCheckpointFailures: 0,
   runnerCompletionByIdentityPhases: [],
 };
+
+function matchedProject(fulfillment: string, value: boolean | string) {
+  return {
+    id: 1,
+    name: 'project-a',
+    value,
+    result: { value },
+    fulfillment,
+    repositoryUrl: state.projectRepositoryUrls[0],
+    repositoryUrls: state.projectRepositoryUrls,
+  };
+}
 
 try {
   process.chdir(root);
@@ -282,6 +296,7 @@ try {
           id: 1,
           name: 'project-a',
           currentlyMatchesCheck: state.projectMatchesCheck,
+          fulfillment: state.projectFulfillment,
           repositoryUrl: state.projectRepositoryUrls[0],
           repositoryUrls: state.projectRepositoryUrls,
         },
@@ -298,6 +313,7 @@ try {
             state.projectPipelineStatus === 'failed'
               ? state.projectPipelineFailureSummary
               : null,
+          retryInstructions: state.projectRetryInstructions,
         },
         providerSync: {
           attempted: !!state.projectMergeRequestUrl,
@@ -359,6 +375,7 @@ try {
           id: 1,
           name: 'project-a',
           currentlyMatchesCheck: state.projectMatchesCheck,
+          fulfillment: state.projectFulfillment,
           repositoryUrl: state.projectRepositoryUrls[0],
           repositoryUrls: state.projectRepositoryUrls,
         },
@@ -406,17 +423,26 @@ try {
             isActive: true,
           },
         ],
-        projects: [
-          {
-            id: 1,
-            name: 'project-a',
-            value: true,
-            result: { value: true },
-            repositoryUrl: state.projectRepositoryUrls[0],
-            repositoryUrls: state.projectRepositoryUrls,
-          },
-        ],
+        projectGroups: {
+          fulfilled:
+            state.projectFulfillment === 'fulfilled'
+              ? [matchedProject('fulfilled', true)]
+              : [],
+          unfulfilled:
+            state.projectFulfillment === 'unfulfilled'
+              ? [matchedProject('unfulfilled', false)]
+              : [],
+          unchecked:
+            state.projectFulfillment === 'unchecked'
+              ? [matchedProject('unchecked', 'unchecked')]
+              : [],
+        },
         total: 1,
+        totalsByFulfillment: {
+          fulfilled: state.projectFulfillment === 'fulfilled' ? 1 : 0,
+          unfulfilled: state.projectFulfillment === 'unfulfilled' ? 1 : 0,
+          unchecked: state.projectFulfillment === 'unchecked' ? 1 : 0,
+        },
       });
     }
 

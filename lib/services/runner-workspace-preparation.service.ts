@@ -582,7 +582,39 @@ async function dismissArchivedProject(
   repositoryUrl?: string,
   localPath?: string
 ): Promise<RunnerWorkspacePrepareResult> {
-  const resolutionReason = archiveDiagnostic.slice(
+  return dismissProjectAutomatically(
+    projectState,
+    {
+      resolutionReason: archiveDiagnostic,
+      note: 'Automatically dismissed because the source-control project is archived and cannot accept changes.',
+      instruction:
+        'The project was automatically dismissed because its source-control repository is archived and cannot accept changes.',
+      automaticDismissal: 'archived_project',
+      diagnostics: [archiveDiagnostic],
+      metadata:
+        archiveDiagnostic.length > MAX_AGENTIC_RUN_RESOLUTION_REASON_LENGTH
+          ? { archiveDiagnostic }
+          : {},
+    },
+    repositoryUrl,
+    localPath
+  );
+}
+
+async function dismissProjectAutomatically(
+  projectState: AgenticRunProjectState,
+  options: {
+    resolutionReason: string;
+    note: string;
+    instruction: string;
+    automaticDismissal: 'archived_project';
+    diagnostics: string[];
+    metadata?: Record<string, unknown>;
+  },
+  repositoryUrl?: string,
+  localPath?: string
+): Promise<RunnerWorkspacePrepareResult> {
+  const resolutionReason = options.resolutionReason.slice(
     0,
     MAX_AGENTIC_RUN_RESOLUTION_REASON_LENGTH
   );
@@ -596,14 +628,11 @@ async function dismissArchivedProject(
       repositoryUrl:
         repositoryUrl ?? projectState.project.repositoryUrl ?? null,
       localPath,
-      notes:
-        'Automatically dismissed because the source-control project is archived and cannot accept changes.',
+      notes: options.note,
       metadata: {
         mcpTool: 'omniboard_runner_prepare_agentic_run_workspace',
-        automaticDismissal: 'archived_project',
-        ...(resolutionReason !== archiveDiagnostic
-          ? { archiveDiagnostic }
-          : {}),
+        automaticDismissal: options.automaticDismissal,
+        ...(options.metadata ?? {}),
       },
     }
   );
@@ -626,10 +655,10 @@ async function dismissArchivedProject(
     action: 'stop',
     reason: 'change_dismissed',
     instructions: [
-      'The project was automatically dismissed because its source-control repository is archived and cannot accept changes.',
+      options.instruction,
       `Dismissal reason: ${resolutionReason}`,
     ],
-    diagnostics: [archiveDiagnostic],
+    diagnostics: options.diagnostics,
   };
 
   return {
@@ -739,6 +768,7 @@ function createNonContinuablePreparation(
     project: {
       id: projectState.project.id,
       name: projectState.project.name,
+      fulfillment: projectState.project.fulfillment,
       repositoryUrl: projectState.project.repositoryUrl,
       repositoryUrls: projectState.project.repositoryUrls,
     },
@@ -756,7 +786,16 @@ function createWorkspaceInstructions(
   continuation: AgenticRunContinuationDecision
 ) {
   if (state.recovery) {
-    return createRecoveryWorkspaceInstructions(runKey, projectName, state);
+    const recoveryInstructions = createRecoveryWorkspaceInstructions(
+      runKey,
+      projectName,
+      state
+    );
+    return [
+      ...recoveryInstructions.slice(0, 1),
+      ...continuation.instructions,
+      ...recoveryInstructions.slice(1),
+    ];
   }
 
   return [

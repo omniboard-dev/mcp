@@ -12,10 +12,10 @@ import {
   MCP_CLI_SETTINGS_ENDPOINT,
 } from '../consts.js';
 import {
+  AGENTIC_RUN_PROJECT_FULFILLMENT_VALUES,
   AgenticRunProgressUpsertInput,
   AgenticRunProgressUpsertResponse,
   AgenticRunProjectState,
-  AgenticRunProjectFulfillment,
   AgenticRunProviderSnapshot,
   AgenticRunResponse,
   AgenticRunsResponse,
@@ -137,11 +137,9 @@ export const getAgenticRun = async (
 export const getAgenticRunMatchedProjects = async ({
   checkName,
   runKey,
-  fulfillment,
 }: {
   checkName?: string;
   runKey?: string;
-  fulfillment?: AgenticRunProjectFulfillment;
 }): Promise<AgenticRunMatchedProjectsResponse> => {
   const response = await request<McpCliApiMatchedProjectsResponse>(
     MCP_CLI_MATCHED_PROJECTS_ENDPOINT,
@@ -149,7 +147,6 @@ export const getAgenticRunMatchedProjects = async ({
       query: {
         checkName,
         runKey,
-        fulfillment,
       },
     }
   );
@@ -170,13 +167,21 @@ export const getAgenticRunMatchedProjects = async ({
       )
     : null;
 
+  const projects = AGENTIC_RUN_PROJECT_FULFILLMENT_VALUES.flatMap(
+    (fulfillment) =>
+      response.projectGroups[fulfillment].map((project) => ({
+        ...normalizeMatchedProject(project),
+        fulfillment,
+      }))
+  );
+
   return {
     check: response.check,
     run: run ? { ...run, check: run.check ?? response.check } : null,
     runs,
-    projects: (response.projects ?? []).map(normalizeMatchedProject),
-    total: response.total ?? response.projects?.length ?? 0,
-    fulfillment: response.fulfillment ?? fulfillment ?? 'fulfilled',
+    projects,
+    total: response.total ?? projects.length,
+    totalsByFulfillment: response.totalsByFulfillment,
   };
 };
 

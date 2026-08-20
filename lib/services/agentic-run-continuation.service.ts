@@ -25,15 +25,6 @@ export function getAgenticRunContinuationDecision(
 ): AgenticRunContinuationDecision {
   const diagnostics = formatPipelineDiagnostics(projectState);
 
-  if (!projectState.project.currentlyMatchesCheck) {
-    return decision(
-      'stop',
-      'project_no_longer_matches',
-      ['The project no longer matches this agentic check. Do not modify it.'],
-      diagnostics
-    );
-  }
-
   if (projectState.progress.status === 'done') {
     return doneDecision(projectState, diagnostics);
   }
@@ -60,9 +51,24 @@ export function getAgenticRunContinuationDecision(
       return decision(
         'continue',
         'active_work',
-        ['Continue work for this agentic run.'],
+        [currentResultGuidance(projectState)],
         diagnostics
       );
+    case 'pending_retry': {
+      const retryInstruction = projectState.progress.retryInstructions?.[0];
+      return decision(
+        'continue',
+        'operator_retry_requested',
+        [
+          'A user explicitly requested another attempt for this project.',
+          currentResultGuidance(projectState),
+          retryInstruction
+            ? 'Operator guidance: ' + retryInstruction.instruction
+            : 'No operator guidance was returned. Inspect the previous failure before continuing.',
+        ],
+        diagnostics
+      );
+    }
     case 'failed':
       if (
         projectState.progress.pipelineStatus === 'failed' &&
@@ -84,6 +90,8 @@ export function getAgenticRunContinuationDecision(
           'application_pipeline_failure',
           [
             'Continue work to resolve the application pipeline failure.',
+            currentResultGuidance(projectState),
+            ...operatorRetryGuidance(projectState),
             ...diagnostics,
           ],
           diagnostics
@@ -92,7 +100,11 @@ export function getAgenticRunContinuationDecision(
       return decision(
         'continue',
         'retry_failed_work',
-        ['Retry the failed agentic run work.'],
+        [
+          'Retry the failed agentic run work.',
+          currentResultGuidance(projectState),
+          ...operatorRetryGuidance(projectState),
+        ],
         diagnostics
       );
     case 'needs_input':
@@ -106,7 +118,10 @@ export function getAgenticRunContinuationDecision(
         return decision(
           'continue',
           'actionable_review_feedback',
-          ['Continue work to resolve the provider review feedback.'],
+          [
+            'Continue work to resolve the provider review feedback.',
+            currentResultGuidance(projectState),
+          ],
           diagnostics
         );
       }
@@ -130,7 +145,10 @@ export function getAgenticRunContinuationDecision(
         return decision(
           'continue',
           'actionable_merge_block',
-          ['Continue work to resolve the provider mergeability issue.'],
+          [
+            'Continue work to resolve the provider mergeability issue.',
+            currentResultGuidance(projectState),
+          ],
           diagnostics
         );
       }
@@ -173,6 +191,17 @@ export function getAgenticRunContinuationDecision(
         diagnostics
       );
   }
+}
+
+function currentResultGuidance(projectState: AgenticRunProjectState) {
+  return `The current agentic check result is ${projectState.project.fulfillment}. Apply the run prompt for this result variant.`;
+}
+
+function operatorRetryGuidance(projectState: AgenticRunProjectState) {
+  const retryInstruction = projectState.progress.retryInstructions?.[0];
+  return retryInstruction
+    ? ['Operator guidance: ' + retryInstruction.instruction]
+    : [];
 }
 
 function doneDecision(

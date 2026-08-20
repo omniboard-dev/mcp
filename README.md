@@ -157,6 +157,14 @@ Reported progress statuses are:
 - `needs_input`: the check still matches.
 - `failed`: analyzer validation failed.
 
+Projects explicitly returned by a user for another attempt use
+`pending_retry`. The latest immutable retry instruction is included in the
+prepared workspace instructions, and MCP reports `in_progress` only after the
+workspace is successfully acquired and prepared. Every matched-project response
+includes fulfilled, unfulfilled, and unchecked projects. Each project carries
+its current fulfillment group so the run prompt can add, remove, or otherwise
+change code for the relevant result variant.
+
 If the continuation decision does not permit validation, the tool returns
 `skipped: true` without reporting another progress status.
 
@@ -377,7 +385,7 @@ is reached.
 
 Batch controls are:
 
-- `statuses`: defaults to `blocked` and `failed`, and accepts any supported
+- `statuses`: defaults to `pending_retry`, `blocked`, and `failed`, and accepts any supported
   canonical progress statuses.
 - `limit`: defaults to one and is bounded at ten.
 - `relevantSourceExtensions`: lets the coding agent identify likely edited

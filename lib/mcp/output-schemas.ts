@@ -69,6 +69,7 @@ export const matchedProjectOutputSchema = z
     repositoryUrls: z.array(z.string()).optional(),
     projectSize: projectSizeOutputSchema.nullable().optional(),
     progress: projectProgressOutputSchema.nullable().optional(),
+    fulfillment: z.enum(AGENTIC_RUN_PROJECT_FULFILLMENT_VALUES),
   })
   .passthrough();
 
@@ -154,7 +155,11 @@ export const matchedProjectsOutputSchema = z
     hasMore: z.boolean(),
     view: z.enum(['full', 'summary']),
     statuses: z.array(z.enum(AGENTIC_RUN_PROGRESS_STATUS_VALUES)),
-    fulfillment: z.enum(AGENTIC_RUN_PROJECT_FULFILLMENT_VALUES),
+    totalsByFulfillment: z.object({
+      fulfilled: z.number().int().nonnegative(),
+      unfulfilled: z.number().int().nonnegative(),
+      unchecked: z.number().int().nonnegative(),
+    }),
   })
   .passthrough();
 
