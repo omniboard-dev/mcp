@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.1.31](https://github.com/omniboard-dev/mcp/compare/v0.1.30...v0.1.31) (2026-08-21)
+
+
+### Features
+
+* **runner:** propagate pipeline failure diagnostics ([60b4045](https://github.com/omniboard-dev/mcp/commit/60b404528384ab14f9f74c7f8833c9d704610337))
+
 ### [0.1.30](https://github.com/omniboard-dev/mcp/compare/v0.1.29...v0.1.30) (2026-08-20)
 
 
