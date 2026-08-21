@@ -9,6 +9,27 @@ import {
 
 const unknownObjectSchema = z.object({}).passthrough();
 const nullableString = z.string().nullable().optional();
+const pipelineFailureJobDiagnosticOutputSchema = z
+  .object({
+    kind: z.enum(['job', 'bridge']).optional(),
+    name: z.string(),
+    stage: nullableString,
+    status: z.string(),
+    failureReason: nullableString,
+    url: nullableString,
+    traceExcerpt: nullableString,
+    traceFetchError: nullableString,
+  })
+  .passthrough();
+const pipelineFailureDiagnosticsOutputSchema = z
+  .object({
+    pipelineUrl: z.string().nullable(),
+    fetchedAt: z.string(),
+    jobs: z.array(pipelineFailureJobDiagnosticOutputSchema),
+    lastAttemptAt: z.string(),
+    lastAttemptError: z.string().nullable(),
+  })
+  .passthrough();
 
 export const agenticRunSummaryOutputSchema = z
   .object({
@@ -39,6 +60,9 @@ export const projectProgressOutputSchema = z
     pipelineStatus: nullableString,
     pipelineUrl: nullableString,
     pipelineFailureSummary: nullableString,
+    pipelineFailureDiagnostics: pipelineFailureDiagnosticsOutputSchema
+      .nullable()
+      .optional(),
     providerSyncError: nullableString,
     error: nullableString,
   })

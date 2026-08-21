@@ -38,6 +38,7 @@ const state: Record<string, any> = {
   bitbucketPullRequestCreateCount: 0,
   bitbucketPullRequestLookupCount: 0,
   bitbucketPullRequestLookupFailures: 0,
+  bitbucketBuildStatuses: [],
   bitbucketProviderSnapshotCount: 0,
   bitbucketPullRequestState: 'OPEN',
   mergeRequestCreateCount: 0,
@@ -314,6 +315,25 @@ try {
             state.projectPipelineStatus === 'failed'
               ? state.projectPipelineFailureSummary
               : null,
+          pipelineFailureDiagnostics:
+            state.projectPipelineStatus === 'failed'
+              ? {
+                  pipelineUrl: state.projectPipelineUrl,
+                  fetchedAt: '2026-07-28T15:05:00.000Z',
+                  jobs: [
+                    {
+                      name: 'unit-tests',
+                      stage: 'test',
+                      status: 'failed',
+                      failureReason: state.projectPipelineFailureReason,
+                      traceExcerpt: state.projectPipelineTraceExcerpt,
+                      traceFetchError: null,
+                    },
+                  ],
+                  lastAttemptAt: '2026-07-28T15:05:00.000Z',
+                  lastAttemptError: null,
+                }
+              : null,
           retryInstructions: state.projectRetryInstructions,
         },
         providerSync: {
@@ -391,6 +411,7 @@ try {
           pipelineStatus: state.projectPipelineStatus,
           pipelineUrl: state.projectPipelineUrl,
           pipelineFailureSummary: body.pipelineFailureSummary,
+          pipelineFailureDiagnostics: body.pipelineFailureDiagnostics,
         },
         providerSync: {
           attempted: true,
@@ -558,7 +579,7 @@ try {
         '/bitbucket/rest/build-status/latest/commits/bitbucket-head'
     ) {
       assert.equal(url.searchParams.get('limit'), '100');
-      return send(response, { values: [] });
+      return send(response, { values: state.bitbucketBuildStatuses });
     }
 
     if (

@@ -136,6 +136,14 @@ export async function runPostMergeRequestContinuationIntegration(context: any) {
   state.projectMergeRequestState = 'open';
   state.projectMergeRequestDetailedStatus = null;
   state.bitbucketPullRequestState = 'MERGED';
+  state.bitbucketBuildStatuses = [
+    {
+      key: 'unit-tests',
+      name: 'Unit tests',
+      state: 'FAILED',
+      url: 'https://ci.example.com/build/17',
+    },
+  ];
   state.providerSyncSuccess = false;
   state.bitbucketPullRequestLookupFailures = 1;
   const failedLocalFallbackContinuation = await prepareRunnerWorkspace({
@@ -167,6 +175,16 @@ export async function runPostMergeRequestContinuationIntegration(context: any) {
   assert.equal(
     bitbucketFallbackContinuation.projectState.progress.status,
     'done'
+  );
+  assert.equal(
+    bitbucketFallbackContinuation.projectState.progress
+      .pipelineFailureDiagnostics?.jobs[0]?.name,
+    'Unit tests'
+  );
+  assert.equal(
+    bitbucketFallbackContinuation.projectState.progress
+      .pipelineFailureDiagnostics?.lastAttemptError,
+    null
   );
   assert.equal(bitbucketFallbackContinuation.continuation.action, 'stop');
   assert.equal(

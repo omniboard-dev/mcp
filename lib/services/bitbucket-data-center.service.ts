@@ -166,6 +166,7 @@ export async function getBitbucketPullRequestDetails(
   const state = pullRequest.state?.toLowerCase() ?? 'open';
   const detailedStatus = resolveMergeDetailedStatus(state, mergeCheck);
   const pipeline = summarizeBuildStatuses(builds?.values ?? []);
+  const diagnosticsFetchedAt = new Date().toISOString();
   return {
     id,
     url,
@@ -190,6 +191,16 @@ export async function getBitbucketPullRequestDetails(
       pipelineStatus: pipeline.status,
       pipelineUrl: pipeline.url,
       pipelineFailureSummary: pipeline.failureSummary,
+      pipelineFailureDiagnostics:
+        pipeline.status === 'failed'
+          ? {
+              pipelineUrl: pipeline.url,
+              fetchedAt: diagnosticsFetchedAt,
+              jobs: pipeline.diagnostics,
+              lastAttemptAt: diagnosticsFetchedAt,
+              lastAttemptError: null,
+            }
+          : null,
       providerStatusUpdatedAt: normalizeUpdatedDate(pullRequest.updatedDate),
       diagnostics: pipeline.diagnostics,
     },

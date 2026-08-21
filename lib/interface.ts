@@ -285,13 +285,23 @@ export const AGENTIC_RUN_RESOLUTION_VALUES = ['merged', 'dismissed'] as const;
 export type AgenticRunResolution =
   (typeof AGENTIC_RUN_RESOLUTION_VALUES)[number];
 
-export interface AgenticRunProviderPipelineDiagnostic {
+export interface PipelineFailureJobDiagnostic {
+  kind?: 'job' | 'bridge';
   name: string;
   stage?: string | null;
   status: string;
   failureReason?: string | null;
   url?: string | null;
   traceExcerpt?: string | null;
+  traceFetchError?: string | null;
+}
+
+export interface PipelineFailureDiagnostics {
+  pipelineUrl: string | null;
+  fetchedAt: string;
+  jobs: PipelineFailureJobDiagnostic[];
+  lastAttemptAt: string;
+  lastAttemptError: string | null;
 }
 
 export interface AgenticRunProviderSnapshot {
@@ -305,8 +315,9 @@ export interface AgenticRunProviderSnapshot {
   pipelineStatus?: string | null;
   pipelineUrl?: string | null;
   pipelineFailureSummary?: string | null;
+  pipelineFailureDiagnostics?: PipelineFailureDiagnostics | null;
   providerStatusUpdatedAt?: string | null;
-  diagnostics?: AgenticRunProviderPipelineDiagnostic[];
+  diagnostics?: PipelineFailureJobDiagnostic[];
 }
 
 export interface AgenticRunProjectProgress {
@@ -322,6 +333,7 @@ export interface AgenticRunProjectProgress {
   pipelineStatus?: string | null;
   pipelineUrl?: string | null;
   pipelineFailureSummary?: string | null;
+  pipelineFailureDiagnostics?: PipelineFailureDiagnostics | null;
   providerSyncError?: string | null;
   retryInstructions?: AgenticRunRetryInstruction[];
   [key: string]: unknown;
@@ -354,7 +366,7 @@ export interface AgenticRunProjectState {
     attempted: boolean;
     success: boolean;
     error?: string | null;
-    diagnostics: AgenticRunProviderPipelineDiagnostic[];
+    diagnostics: PipelineFailureJobDiagnostic[];
   };
 }
 

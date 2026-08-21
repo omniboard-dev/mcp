@@ -192,6 +192,8 @@ function summarizeMatchedProject(
           pipelineStatus: progress.pipelineStatus ?? null,
           pipelineUrl: progress.pipelineUrl ?? null,
           pipelineFailureSummary: progress.pipelineFailureSummary ?? null,
+          pipelineFailureDiagnostics:
+            progress.pipelineFailureDiagnostics ?? null,
           providerSyncError: progress.providerSyncError ?? null,
           error: progress.error ?? null,
           retryInstructions: progress.retryInstructions ?? [],
