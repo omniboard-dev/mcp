@@ -304,7 +304,7 @@ export async function runWorkspacePreparationIntegration(context: any) {
   assert.equal(prepared.workspace.projectPath, 'group/project');
   assert.match(prepared.workspace.preparedHeadSha, /^[a-f0-9]{40}$/);
   assert.equal(prepared.prompt, 'Update the icon registry.');
-  assert.equal(progress.at(-1).localPath, prepared.workspace.localPath);
+  assert.equal('localPath' in progress.at(-1), false);
   assert.deepEqual(
     await readGitIdentity(execFile, prepared.workspace.localPath),
     ['MCP Startup User', 'startup@example.com']

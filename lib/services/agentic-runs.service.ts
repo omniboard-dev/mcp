@@ -30,7 +30,6 @@ export interface ReportAgenticRunProgressOptions {
   resolution?: AgenticRunResolution | null;
   resolutionReason?: string | null;
   repositoryUrl?: string | null;
-  localPath?: string | null;
   branch?: string | null;
   commitSha?: string | null;
   mergeRequestUrl?: string | null;
@@ -295,7 +294,6 @@ export async function reportRunnerAgenticRunProgress(
     resolution: options.resolution,
     resolutionReason: options.resolutionReason,
     repositoryUrl: options.repositoryUrl,
-    localPath: options.localPath,
     branch: options.branch,
     commitSha: options.commitSha,
     mergeRequestUrl: options.mergeRequestUrl,
@@ -437,7 +435,6 @@ async function createAgenticRunProgressPayload(
     resolution: options.resolution,
     resolutionReason: options.resolutionReason,
     repositoryUrl: options.repositoryUrl ?? project.repository ?? null,
-    localPath: options.localPath ?? process.cwd(),
     branch: options.branch ?? project.branch ?? null,
     commitSha: options.commitSha,
     mergeRequestUrl: options.mergeRequestUrl,

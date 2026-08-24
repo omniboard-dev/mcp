@@ -302,7 +302,6 @@ export async function runAgenticRunIntegration(context: any) {
     status: 'done',
     resolution: 'dismissed',
     resolutionReason: 'false_positive',
-    localPath: '/runner/project-a',
     metadata: { executionMode: 'caller-controlled' },
   });
   const callerControlledProgress = progress.at(-1);
@@ -310,7 +309,7 @@ export async function runAgenticRunIntegration(context: any) {
     callerControlledProgress.metadata.executionMode,
     'dedicated-runner'
   );
-  assert.equal(callerControlledProgress.localPath, '/runner/project-a');
+  assert.equal('localPath' in callerControlledProgress, false);
   assert.equal(callerControlledProgress.status, 'done');
   assert.equal(callerControlledProgress.resolution, 'dismissed');
   assert.equal(callerControlledProgress.resolutionReason, 'false_positive');
@@ -332,6 +331,6 @@ export async function runAgenticRunIntegration(context: any) {
   );
 
   await reportAgenticRunProgress('run-icons', { status: 'in_progress' });
-  assert.equal(progress.at(-1).localPath, root);
+  assert.equal('localPath' in progress.at(-1), false);
   progress.length = 0;
 }

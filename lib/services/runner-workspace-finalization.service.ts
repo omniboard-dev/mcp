@@ -170,7 +170,6 @@ export async function finalizeRunnerWorkspace({
       await reportRunnerAgenticRunProgressSafely(runKey, projectName, {
         status: 'committed',
         repositoryUrl: state.repositoryUrl,
-        localPath,
         branch: state.branch,
         commitSha,
         notes: resolvedCommitMessage,
@@ -207,7 +206,6 @@ export async function finalizeRunnerWorkspace({
       await reportRunnerAgenticRunProgressSafely(runKey, projectName, {
         status: 'pushed',
         repositoryUrl: state.repositoryUrl,
-        localPath,
         branch: state.branch,
         commitSha,
         notes: `Pushed branch "${state.branch}".`,
@@ -227,7 +225,6 @@ export async function finalizeRunnerWorkspace({
       await reportRunnerAgenticRunProgressSafely(runKey, projectName, {
         status: 'mr_created',
         repositoryUrl: state.repositoryUrl,
-        localPath,
         branch: state.branch,
         commitSha,
         mergeRequestUrl: mergeRequest.url,
@@ -256,7 +253,6 @@ export async function finalizeRunnerWorkspace({
       await reportRunnerAgenticRunProgressSafely(runKey, projectName, {
         status: 'failed',
         repositoryUrl: state.repositoryUrl,
-        localPath,
         branch: state.branch,
         error: failureMessage,
         notes: 'Dedicated runner finalization failed.',

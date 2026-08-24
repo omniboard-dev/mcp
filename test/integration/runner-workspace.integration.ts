@@ -520,6 +520,36 @@ try {
     }
 
     if (request.method === 'PUT' && url.pathname === '/mcp-cli/progress') {
+      const allowedProgressFields = new Set([
+        'runKey',
+        'projectName',
+        'repositoryUrl',
+        'status',
+        'resolution',
+        'resolutionReason',
+        'branch',
+        'commitSha',
+        'mergeRequestUrl',
+        'mergeRequestState',
+        'mergeRequestDetailedStatus',
+        'pipelineStatus',
+        'pipelineUrl',
+        'pipelineFailureSummary',
+        'attempts',
+        'startedAt',
+        'finishedAt',
+        'checkedAt',
+        'gitlabStatusUpdatedAt',
+        'verification',
+        'error',
+        'notes',
+        'metadata',
+        'lastUpdateSource',
+      ]);
+      assert.deepEqual(
+        Object.keys(body).filter((key) => !allowedProgressFields.has(key)),
+        []
+      );
       progress.push(body);
       return send(response, { changed: true, row: body });
     }

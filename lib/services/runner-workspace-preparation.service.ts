@@ -490,7 +490,6 @@ async function prepareRunnerWorkspaceInternal({
         status:
           state.recovery?.phase === 'conflicts' ? 'blocked' : 'in_progress',
         repositoryUrl: resolvedRepositoryUrl,
-        localPath: state.localPath,
         branch: state.branch,
         notes: state.recovery
           ? formatRecoveryProgressNote(state)
@@ -552,8 +551,7 @@ async function prepareRunnerWorkspaceInternal({
       return dismissArchivedProject(
         projectState,
         archivedProjectFeedback,
-        resolvedRepositoryUrl,
-        localPath
+        resolvedRepositoryUrl
       );
     }
 
@@ -565,7 +563,6 @@ async function prepareRunnerWorkspaceInternal({
     await reportRunnerAgenticRunProgressSafely(runKey, projectName, {
       status: 'failed',
       repositoryUrl: resolvedRepositoryUrl ?? null,
-      localPath,
       error: failureMessage,
       notes: 'Dedicated runner workspace preparation failed.',
       metadata: {
@@ -579,8 +576,7 @@ async function prepareRunnerWorkspaceInternal({
 async function dismissArchivedProject(
   projectState: AgenticRunProjectState,
   archiveDiagnostic: string,
-  repositoryUrl?: string,
-  localPath?: string
+  repositoryUrl?: string
 ): Promise<RunnerWorkspacePrepareResult> {
   return dismissProjectAutomatically(
     projectState,
@@ -596,8 +592,7 @@ async function dismissArchivedProject(
           ? { archiveDiagnostic }
           : {},
     },
-    repositoryUrl,
-    localPath
+    repositoryUrl
   );
 }
 
@@ -611,8 +606,7 @@ async function dismissProjectAutomatically(
     diagnostics: string[];
     metadata?: Record<string, unknown>;
   },
-  repositoryUrl?: string,
-  localPath?: string
+  repositoryUrl?: string
 ): Promise<RunnerWorkspacePrepareResult> {
   const resolutionReason = options.resolutionReason.slice(
     0,
@@ -627,7 +621,6 @@ async function dismissProjectAutomatically(
       resolutionReason,
       repositoryUrl:
         repositoryUrl ?? projectState.project.repositoryUrl ?? null,
-      localPath,
       notes: options.note,
       metadata: {
         mcpTool: 'omniboard_runner_prepare_agentic_run_workspace',

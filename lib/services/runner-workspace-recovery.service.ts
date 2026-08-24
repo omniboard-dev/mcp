@@ -171,7 +171,6 @@ export async function finalizeRunnerRebaseRecovery(
         {
           status: 'blocked',
           repositoryUrl: state.repositoryUrl,
-          localPath,
           branch: state.branch,
           error,
           notes: error,
@@ -217,7 +216,6 @@ export async function finalizeRunnerRebaseRecovery(
           {
             status: 'blocked',
             repositoryUrl: state.repositoryUrl,
-            localPath,
             branch: state.branch,
             error,
             notes: error,
@@ -278,7 +276,6 @@ export async function finalizeRunnerRebaseRecovery(
         {
           status: 'blocked',
           repositoryUrl: state.repositoryUrl,
-          localPath,
           branch: state.branch,
           error,
           notes: error,
@@ -316,7 +313,6 @@ export async function finalizeRunnerRebaseRecovery(
       {
         status: 'pushed',
         repositoryUrl: state.repositoryUrl,
-        localPath,
         branch: state.branch,
         commitSha,
         mergeRequestUrl: mergeRequest.url,
@@ -369,7 +365,6 @@ async function reportRunnerRecoveryConflicts(
       {
         status: 'blocked',
         repositoryUrl: state.repositoryUrl,
-        localPath,
         branch: state.branch,
         notes: formatRecoveryProgressNote(state),
         metadata: createRecoveryProgressMetadata(recovery),
@@ -487,7 +482,6 @@ export async function prepareRunnerRebaseRecovery(
       {
         status: 'in_progress',
         repositoryUrl: state.repositoryUrl,
-        localPath,
         branch: state.branch,
         notes:
           'Provider-native rebase was unavailable, so MCP CLI started a local rebase: ' +

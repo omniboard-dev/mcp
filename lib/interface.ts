@@ -419,7 +419,6 @@ export interface AgenticRunProgressUpsertInput {
   resolution?: AgenticRunResolution | null;
   resolutionReason?: string | null;
   repositoryUrl?: string | null;
-  localPath?: string | null;
   branch?: string | null;
   commitSha?: string | null;
   mergeRequestUrl?: string | null;
