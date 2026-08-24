@@ -347,8 +347,9 @@ MCP CLI process working directory or report progress.
 Available query controls are:
 
 - `statuses`: filters by canonical stored progress status.
-- `fulfillment`: selects `"fulfilled"` (the default) or `"unfulfilled"`
-  projects. Unchecked projects are not part of this query.
+- Fulfilled, unfulfilled, and unchecked projects are returned together. Each
+  project carries its `fulfillment` value and `targetedByRun` flag so discovery
+  and batch preparation apply the run definition to the correct result variant.
 - `offset` and `limit`: page the filtered result.
 - `view: "summary"`: omits project result payloads and expanded run metadata
   while retaining repository, progress, merge request, pipeline, and error
@@ -364,8 +365,9 @@ Pagination fields are:
 Listing is side-effect free with respect to agentic-run and project state: it
 reads stored progress and does not refresh providers, record snapshots, prepare
 workspaces, or report progress. Stored provider details can therefore be stale.
-Unfulfilled selection is currently for discovery; workspace preparation and
-batch execution continue to select fulfilled projects.
+Workspace preparation and batch execution select every project whose current
+result variant is targeted by the run, including unfulfilled and unchecked
+projects when the run definition targets those variants.
 
 Use the tools in this order:
 
