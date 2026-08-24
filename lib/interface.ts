@@ -70,6 +70,7 @@ export interface McpCliApiMatchedProject {
   repositoryUrls?: string[];
   projectSize?: ProjectSize | null;
   progress?: AgenticRunProjectProgress | null;
+  targetedByRun?: boolean;
 }
 
 export interface ProjectSizeMetrics {
@@ -107,6 +108,7 @@ export interface McpCliApiAgenticRun {
   prompt?: string | null;
   branchName?: string | null;
   commitMessage?: string | null;
+  targetFulfillment?: AgenticRunProjectFulfillment;
   status?: AgenticRunStatus | string | null;
   progress?: Record<string, unknown> | null;
   result?: unknown;
@@ -181,6 +183,7 @@ export interface AgenticRunMatchedProject {
   projectSize?: ProjectSize | null;
   progress?: AgenticRunProjectProgress | null;
   fulfillment: AgenticRunProjectFulfillment;
+  targetedByRun: boolean;
 }
 
 export interface AgenticRunMatchedProjectsResponse {
@@ -226,6 +229,7 @@ export interface AgenticRunSummary {
   prompt?: string | null;
   branchName?: string | null;
   commitMessage?: string | null;
+  targetFulfillment: AgenticRunProjectFulfillment;
   status?: AgenticRunStatus | string | null;
   progress?: Record<string, unknown> | null;
   result?: unknown;
@@ -358,6 +362,7 @@ export interface AgenticRunProjectState {
     name: string;
     currentlyMatchesCheck: boolean;
     fulfillment: AgenticRunProjectFulfillment;
+    targetedByRun: boolean;
     repositoryUrl?: string | null;
     repositoryUrls?: string[];
   };
@@ -384,6 +389,7 @@ export type AgenticRunContinuationReason =
   | 'infrastructure_pipeline_failure'
   | 'operator_retry_requested'
   | 'provider_sync_failed'
+  | 'result_not_targeted'
   | 'retry_failed_work'
   | 'unsupported_progress_status'
   | 'waiting_for_provider_activity';

@@ -769,6 +769,7 @@ function createNonContinuablePreparation(
       id: projectState.project.id,
       name: projectState.project.name,
       fulfillment: projectState.project.fulfillment,
+      targetedByRun: projectState.project.targetedByRun,
       repositoryUrl: projectState.project.repositoryUrl,
       repositoryUrls: projectState.project.repositoryUrls,
     },

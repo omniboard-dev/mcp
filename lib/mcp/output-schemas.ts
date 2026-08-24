@@ -38,6 +38,7 @@ export const agenticRunSummaryOutputSchema = z
     prompt: nullableString,
     branchName: nullableString,
     commitMessage: nullableString,
+    targetFulfillment: z.enum(AGENTIC_RUN_PROJECT_FULFILLMENT_VALUES),
     status: nullableString,
     progress: unknownObjectSchema.nullable().optional(),
     result: z.unknown().optional(),
@@ -94,6 +95,7 @@ export const matchedProjectOutputSchema = z
     projectSize: projectSizeOutputSchema.nullable().optional(),
     progress: projectProgressOutputSchema.nullable().optional(),
     fulfillment: z.enum(AGENTIC_RUN_PROJECT_FULFILLMENT_VALUES),
+    targetedByRun: z.boolean(),
   })
   .passthrough();
 

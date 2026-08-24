@@ -104,7 +104,9 @@ export async function runAgenticRunIntegration(context: any) {
     status,
     mergeRequestDetailedStatus = null,
     resolution = null,
-    providerSyncSuccess = true
+    providerSyncSuccess = true,
+    targetedByRun = true,
+    hasProgress = true
   ) =>
     getAgenticRunContinuationDecision({
       run: {
@@ -117,8 +119,15 @@ export async function runAgenticRunIntegration(context: any) {
         id: 1,
         name: 'project-a',
         currentlyMatchesCheck: true,
+        fulfillment: 'fulfilled',
+        targetedByRun,
       },
-      progress: { status, mergeRequestDetailedStatus, resolution },
+      progress: {
+        status,
+        hasProgress,
+        mergeRequestDetailedStatus,
+        resolution,
+      },
       providerSync: {
         attempted: false,
         success: providerSyncSuccess,
@@ -137,6 +146,16 @@ export async function runAgenticRunIntegration(context: any) {
     assert.equal(continuationDecision(status).reason, 'active_work');
   }
   assert.equal(continuationDecision('failed').reason, 'retry_failed_work');
+  const nonTargetedDecision = continuationDecision(
+    'pending',
+    null,
+    null,
+    true,
+    false,
+    false
+  );
+  assert.equal(nonTargetedDecision.action, 'stop');
+  assert.equal(nonTargetedDecision.reason, 'result_not_targeted');
   assert.deepEqual(
     [
       ['needs_input', 'requested_changes'],

@@ -61,6 +61,7 @@ assert(
 const run = {
   runKey: 'run-icons',
   checkName: 'icon-registry',
+  targetFulfillment: 'fulfilled',
   prompt: 'Large migration prompt',
   status: 'active',
   isActive: true,
@@ -132,6 +133,7 @@ const unfulfilledRetryBatch = await prepareNextRunnerProjects(
 );
 assert.equal(retryDiscoveryRequests.length, 1);
 assert.deepEqual(retryDiscoveryRequests[0].statuses, [
+  'pending',
   'pending_retry',
   'blocked',
   'failed',
@@ -890,6 +892,7 @@ function project(name, status, progress = {}, fulfillment = 'fulfilled') {
     value: true,
     result: { large: 'payload' },
     fulfillment,
+    targetedByRun: true,
     repositoryUrl: `https://gitlab.example.com/group/${name}.git`,
     progress: {
       status,

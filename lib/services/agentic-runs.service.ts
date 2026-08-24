@@ -178,6 +178,7 @@ function summarizeMatchedProject(
     repositoryUrls: project.repositoryUrls ?? [],
     projectSize: project.projectSize ?? null,
     fulfillment: project.fulfillment,
+    targetedByRun: project.targetedByRun,
     progress: progress
       ? {
           status: progress.status,

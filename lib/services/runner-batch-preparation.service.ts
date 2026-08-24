@@ -14,6 +14,7 @@ import {
 } from './runner-workspace-preparation.service.js';
 
 const DEFAULT_STATUSES: AgenticRunProgressStatus[] = [
+  'pending',
   'pending_retry',
   'blocked',
   'failed',

@@ -25,6 +25,21 @@ export function getAgenticRunContinuationDecision(
 ): AgenticRunContinuationDecision {
   const diagnostics = formatPipelineDiagnostics(projectState);
 
+  if (
+    projectState.project.targetedByRun === false &&
+    projectState.progress.hasProgress === false
+  ) {
+    return decision(
+      'stop',
+      'result_not_targeted',
+      [
+        'The current check result is not targeted by this agentic run. Do not prepare or modify this project.',
+        currentResultGuidance(projectState),
+      ],
+      diagnostics
+    );
+  }
+
   if (projectState.progress.status === 'done') {
     return doneDecision(projectState, diagnostics);
   }

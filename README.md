@@ -385,7 +385,7 @@ is reached.
 
 Batch controls are:
 
-- `statuses`: defaults to `pending_retry`, `blocked`, and `failed`, and accepts any supported
+- `statuses`: defaults to `pending`, `pending_retry`, `blocked`, and `failed`, and accepts any supported
   canonical progress statuses.
 - `limit`: defaults to one and is bounded at ten.
 - `relevantSourceExtensions`: lets the coding agent identify likely edited

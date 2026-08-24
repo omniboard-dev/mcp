@@ -15,6 +15,7 @@ import {
   AGENTIC_RUN_PROJECT_FULFILLMENT_VALUES,
   AgenticRunProgressUpsertInput,
   AgenticRunProgressUpsertResponse,
+  AgenticRunProjectFulfillment,
   AgenticRunProjectState,
   AgenticRunProviderSnapshot,
   AgenticRunResponse,
@@ -405,6 +406,7 @@ function normalizeAgenticRunSummary(
     prompt: normalizeString(run.prompt ?? run.check?.prompt) ?? null,
     branchName: normalizeString(run.branchName) ?? null,
     commitMessage: normalizeString(run.commitMessage) ?? null,
+    targetFulfillment: normalizeProjectFulfillment(run.targetFulfillment),
     status,
     progress: run.progress ?? null,
     result: run.result,
@@ -413,6 +415,16 @@ function normalizeAgenticRunSummary(
     updateDate: run.updateDate ?? null,
     raw: run,
   };
+}
+
+function normalizeProjectFulfillment(
+  value: unknown
+): AgenticRunProjectFulfillment {
+  return AGENTIC_RUN_PROJECT_FULFILLMENT_VALUES.includes(
+    value as AgenticRunProjectFulfillment
+  )
+    ? (value as AgenticRunProjectFulfillment)
+    : 'fulfilled';
 }
 
 function normalizeString(value: unknown) {
@@ -440,7 +452,7 @@ function normalizeApiProject(
 
 function normalizeMatchedProject(
   project: McpCliApiMatchedProject
-): McpCliApiMatchedProject {
+): McpCliApiMatchedProject & { targetedByRun: boolean } {
   return {
     id: project.id,
     name: project.name,
@@ -452,5 +464,6 @@ function normalizeMatchedProject(
     repositoryUrls: project.repositoryUrls ?? [],
     projectSize: project.projectSize ?? null,
     progress: project.progress ?? null,
+    targetedByRun: project.targetedByRun ?? false,
   };
 }
