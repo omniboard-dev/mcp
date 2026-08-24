@@ -3,7 +3,10 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
-import { AgenticRunValidationResponse } from '../interface.js';
+import {
+  AgenticRunProjectFulfillment,
+  AgenticRunValidationResponse,
+} from '../interface.js';
 import {
   getAgenticRun,
   reportAgenticRunProgressSafely,
@@ -95,7 +98,10 @@ export async function validateAgenticRun(
 
     const json = JSON.parse(await fs.readFile(outputPath, 'utf8'));
     const check = json?.checks?.[checkName];
-    const stillMatches = check?.value === true;
+    const stillMatches = isAgenticRunResultTargeted(
+      check?.value,
+      run.targetFulfillment
+    );
 
     response = {
       checkName,
@@ -163,6 +169,25 @@ async function cleanupGeneratedJson(outputPath: string) {
   } catch {
     return false;
   }
+}
+
+export function isAgenticRunResultTargeted(
+  value: unknown,
+  targetFulfillment: AgenticRunProjectFulfillment
+) {
+  return resolveAgenticRunResultFulfillment(value) === targetFulfillment;
+}
+
+function resolveAgenticRunResultFulfillment(
+  value: unknown
+): AgenticRunProjectFulfillment {
+  if (value === true) {
+    return 'fulfilled';
+  }
+  if (value === false) {
+    return 'unfulfilled';
+  }
+  return 'unchecked';
 }
 
 function shellQuote(value: string) {

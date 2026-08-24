@@ -14,12 +14,22 @@ const { createAgenticRunProjectList } = await import(
 const { prepareNextRunnerProjects } = await import(
   '../../dist/services/runner-batch-preparation.service.js'
 );
+const { isAgenticRunResultTargeted } = await import(
+  '../../dist/services/analyzer-validation.service.js'
+);
 const { getAgenticRunContinuationDecision } = await import(
   '../../dist/services/agentic-run-continuation.service.js'
 );
 const { RunnerExecutionLeaseConflictError } = await import(
   '../../dist/services/runner-execution.service.js'
 );
+
+assert.equal(isAgenticRunResultTargeted(true, 'fulfilled'), true);
+assert.equal(isAgenticRunResultTargeted(false, 'fulfilled'), false);
+assert.equal(isAgenticRunResultTargeted(false, 'unfulfilled'), true);
+assert.equal(isAgenticRunResultTargeted(true, 'unfulfilled'), false);
+assert.equal(isAgenticRunResultTargeted(undefined, 'unchecked'), true);
+assert.equal(isAgenticRunResultTargeted(false, 'unchecked'), false);
 
 const structuredResult = createStructuredToolResult({
   total: 1,
@@ -73,6 +83,10 @@ const unfulfilledRetryProject = project(
   {},
   'unfulfilled'
 );
+const nonTargetedRetryProject = {
+  ...project('a-project-non-targeted', 'pending_retry'),
+  targetedByRun: false,
+};
 const unfulfilledRetryBatch = await prepareNextRunnerProjects(
   { runKey: run.runKey, limit: 1 },
   {
@@ -89,9 +103,12 @@ const unfulfilledRetryBatch = await prepareNextRunnerProjects(
           },
           run,
           runs: [run],
-          projects: [unfulfilledRetryProject],
-          total: 1,
-          totalsByFulfillment: fulfillmentTotals({ unfulfilled: 1 }),
+          projects: [nonTargetedRetryProject, unfulfilledRetryProject],
+          total: 2,
+          totalsByFulfillment: fulfillmentTotals({
+            fulfilled: 1,
+            unfulfilled: 1,
+          }),
         },
         {
           statuses: options.statuses,

@@ -109,7 +109,9 @@ export async function prepareNextRunnerProjects(
     statuses,
     view: 'full',
   });
-  const discoveredProjects = discovery.projects;
+  const discoveredProjects = discovery.projects.filter(
+    (project) => project.targetedByRun
+  );
   const { sourceSelection, projectExtensions } = resolveSourceSelection(
     options.relevantSourceExtensions,
     discovery.run?.prompt ?? discovery.check.prompt,
