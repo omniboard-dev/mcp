@@ -389,17 +389,18 @@ Batch controls are:
   canonical progress statuses.
 - `limit`: defaults to one and is bounded at ten.
 - `relevantSourceExtensions`: lets the coding agent identify likely edited
-  source types after interpreting the run prompt, for example `["json"]` for a
-  registry migration.
+  source types after interpreting the run prompt. Relevant source lines and file
+  counts provide deterministic tie-breakers after total source size.
 
 Candidates are ordered smallest-first:
 
-1. MCP CLI uses explicitly supplied relevant source extensions when available.
-2. Otherwise, it derives extensions from prompt/check text and matched paths.
-3. It prefers the Analyzer-reported line count for the selected extensions.
-4. Relevant file count, total lines, total files, and project name provide
-   deterministic tie-breakers.
-5. If no relevant extension can be inferred, MCP CLI ranks by total project size.
+1. Analyzer-reported source line count is the primary ranking metric.
+2. Source file count provides the first deterministic tie-breaker.
+3. Lines and file counts for explicitly supplied or inferred relevant source
+   extensions provide additional tie-breakers.
+4. Project name is the final deterministic tie-breaker.
+5. Older `projectSize` metadata without a source breakdown falls back to aggregate
+   project metrics.
 6. Projects without `projectSize` metadata remain eligible but follow measured
    projects.
 

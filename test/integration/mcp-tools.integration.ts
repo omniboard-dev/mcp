@@ -313,19 +313,68 @@ assert.deepEqual(rankedBatch.sourceSelection, {
 assert.deepEqual(
   rankedBatch.results.map(({ projectName }) => projectName),
   [
+    'project-small-total',
     'project-small-json',
     'project-large-json',
-    'project-small-total',
     'project-size-unknown',
   ]
 );
 assert.deepEqual(rankedBatch.results[0].sizeRanking, {
   metadataAvailable: true,
   relevantExtensions: ['json'],
+  relevantLines: 80,
+  relevantFiles: 1,
+  totalLines: 100,
+  totalFiles: 100,
+});
+
+const sourceSizedProjects = [
+  projectWithSizeBreakdown('project-small-source', 10, 10, 10_000),
+  projectWithSizeBreakdown('project-large-source', 100, 1, 0),
+];
+const sourceSizedCandidates = createAgenticRunProjectList(
+  {
+    check: {
+      name: 'typescript-migration',
+      type: 'regex',
+      description: 'Update TypeScript source.',
+      agentic: true,
+      prompt: 'Update TypeScript source.',
+    },
+    run: {
+      ...run,
+      checkName: 'typescript-migration',
+      prompt: 'Update TypeScript source.',
+    },
+    runs: [run],
+    projects: sourceSizedProjects,
+    total: sourceSizedProjects.length,
+    totalsByFulfillment: fulfillmentTotals({
+      fulfilled: sourceSizedProjects.length,
+    }),
+  },
+  { statuses: ['failed'] }
+);
+const sourceRankedBatch = await prepareNextRunnerProjects(
+  {
+    runKey: run.runKey,
+    statuses: ['failed'],
+    limit: 2,
+    relevantSourceExtensions: ['ts'],
+  },
+  batchDependencies(sourceSizedCandidates)
+);
+assert.deepEqual(
+  sourceRankedBatch.results.map(({ projectName }) => projectName),
+  ['project-small-source', 'project-large-source']
+);
+assert.deepEqual(sourceRankedBatch.results[0].sizeRanking, {
+  metadataAvailable: true,
+  relevantExtensions: ['ts'],
   relevantLines: 10,
   relevantFiles: 1,
-  totalLines: 1_000,
-  totalFiles: 100,
+  totalLines: 10,
+  totalFiles: 2,
 });
 
 const inferredRankedBatch = await prepareNextRunnerProjects(
@@ -340,7 +389,7 @@ const inferredRankedBatch = await prepareNextRunnerProjects(
 );
 assert.deepEqual(inferredRankedBatch.sourceSelection.extensions, ['json']);
 assert.equal(inferredRankedBatch.sourceSelection.origin, 'prompt_and_results');
-assert.equal(inferredRankedBatch.results[0].projectName, 'project-small-json');
+assert.equal(inferredRankedBatch.results[0].projectName, 'project-small-total');
 
 const multiDotProjects = [
   sizedProject('project-few-typescript-lines', 1_000, 990),
@@ -382,7 +431,7 @@ const multiDotRankedBatch = await prepareNextRunnerProjects(
 assert.deepEqual(multiDotRankedBatch.sourceSelection.extensions, ['ts']);
 assert.equal(
   multiDotRankedBatch.results[0].projectName,
-  'project-few-typescript-lines'
+  'project-small-overall'
 );
 
 const projectLocalResultProjects = [
@@ -418,8 +467,8 @@ assert.deepEqual(
     sizeRanking.relevantLines,
   ]),
   [
-    ['project-json-result', ['json'], 10],
     ['project-typescript-result', ['ts'], 20],
+    ['project-json-result', ['json'], 10],
   ]
 );
 
@@ -445,13 +494,13 @@ const uppercaseResultBatch = await prepareNextRunnerProjects(
 assert.deepEqual(uppercaseResultBatch.sourceSelection.extensions, ['ts']);
 assert.equal(
   uppercaseResultBatch.results[0].projectName,
-  'project-uppercase-typescript'
+  'project-small-uppercase-fallback'
 );
 assert.deepEqual(
   uppercaseResultBatch.results[0].sizeRanking.relevantExtensions,
-  ['ts']
+  ['json']
 );
-assert.equal(uppercaseResultBatch.results[0].sizeRanking.relevantLines, 10);
+assert.equal(uppercaseResultBatch.results[0].sizeRanking.relevantLines, 100);
 
 const profileOnlyProjects = [
   {
@@ -495,7 +544,7 @@ const nestedFileBatch = await prepareNextRunnerProjects(
 assert.deepEqual(nestedFileBatch.sourceSelection.extensions, ['ts']);
 assert.equal(
   nestedFileBatch.results[0].projectName,
-  'project-nested-typescript'
+  'project-small-nested-fallback'
 );
 
 const inferenceEdgeProjects = [
@@ -520,7 +569,7 @@ const imperativeGoBatch = await prepareNextRunnerProjects(
 assert.deepEqual(imperativeGoBatch.sourceSelection.extensions, ['json']);
 assert.equal(
   imperativeGoBatch.results[0].projectName,
-  'project-few-json-lines'
+  'project-more-json-lines'
 );
 
 const urlOnlyBatch = await prepareNextRunnerProjects(
@@ -546,10 +595,7 @@ const urlPathBatch = await prepareNextRunnerProjects(
   )
 );
 assert.deepEqual(urlPathBatch.sourceSelection.extensions, ['ts']);
-assert.equal(
-  urlPathBatch.results[0].projectName,
-  'project-few-typescript-lines'
-);
+assert.equal(urlPathBatch.results[0].projectName, 'project-small-overall');
 
 let invalidExplicitPreparationStarted = false;
 await assert.rejects(
@@ -914,6 +960,47 @@ function sizedProject(name, totalLines, jsonLines) {
       linesByExtension: {
         json: jsonLines,
         ts: totalLines - jsonLines,
+      },
+    },
+  };
+}
+
+function projectWithSizeBreakdown(
+  name,
+  sourceLines,
+  typescriptLines,
+  otherLines
+) {
+  return {
+    ...project(name, 'failed'),
+    projectSize: {
+      totalFiles: otherLines > 0 ? 3 : 2,
+      totalLines: sourceLines + otherLines,
+      byExtension: {
+        ts: 1,
+        html: 1,
+        ...(otherLines > 0 ? { json: 1 } : {}),
+      },
+      linesByExtension: {
+        ts: typescriptLines,
+        html: sourceLines - typescriptLines,
+        ...(otherLines > 0 ? { json: otherLines } : {}),
+      },
+      breakdownVersion: 1,
+      source: {
+        totalFiles: 2,
+        totalLines: sourceLines,
+        byExtension: { ts: 1, html: 1 },
+        linesByExtension: {
+          ts: typescriptLines,
+          html: sourceLines - typescriptLines,
+        },
+      },
+      others: {
+        totalFiles: otherLines > 0 ? 1 : 0,
+        totalLines: otherLines,
+        byExtension: otherLines > 0 ? { json: 1 } : {},
+        linesByExtension: otherLines > 0 ? { json: otherLines } : {},
       },
     },
   };

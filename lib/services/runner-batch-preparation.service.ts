@@ -256,12 +256,13 @@ function resolveSourceSelection(
     extractPromptExtensions([prompt, description].filter(Boolean).join(' '))
   );
   const projectExtensions = projects.map((project) => {
+    const projectSize = project.projectSize?.source ?? project.projectSize;
     const availableExtensions = new Set(
       normalizeExtensions(
-        project.projectSize
+        projectSize
           ? [
-              ...Object.keys(project.projectSize.byExtension),
-              ...Object.keys(project.projectSize.linesByExtension),
+              ...Object.keys(projectSize.byExtension),
+              ...Object.keys(projectSize.linesByExtension),
             ]
           : []
       )
@@ -291,7 +292,7 @@ function createProjectSizeRanking(
   project: AgenticRunMatchedProject,
   relevantExtensions: string[]
 ): RunnerBatchProjectSizeRanking {
-  const projectSize = project.projectSize;
+  const projectSize = project.projectSize?.source ?? project.projectSize;
   if (!projectSize) {
     return {
       metadataAvailable: false,
@@ -341,10 +342,10 @@ function compareRankedProjects(
   }
 
   for (const key of [
-    'relevantLines',
-    'relevantFiles',
     'totalLines',
     'totalFiles',
+    'relevantLines',
+    'relevantFiles',
   ] as const) {
     const difference =
       (left.sizeRanking[key] ?? Number.MAX_SAFE_INTEGER) -
