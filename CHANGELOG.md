@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.1.34](https://github.com/omniboard-dev/mcp/compare/v0.1.33...v0.1.34) (2026-08-24)
+
+
+### Bug Fixes
+
+* **runner:** honor target fulfillment across tools ([fab0248](https://github.com/omniboard-dev/mcp/commit/fab0248d4da40499142e015ab2bf340d597215bd))
+* **runner:** include pending projects without progress ([5fe1545](https://github.com/omniboard-dev/mcp/commit/5fe15453fe38c723557a1c4f8caa23f18d8f261b))
+
 ### [0.1.33](https://github.com/omniboard-dev/mcp/compare/v0.1.32...v0.1.33) (2026-08-24)
 
 
