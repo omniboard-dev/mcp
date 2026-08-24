@@ -104,9 +104,8 @@ export function createAgenticRunProjectList(
   assertPagination(offset, limit);
   const selectedStatuses = [...new Set(statuses)];
   const filteredProjects = selectedStatuses.length
-    ? response.projects.filter(
-        (project) =>
-          project.progress && selectedStatuses.includes(project.progress.status)
+    ? response.projects.filter((project) =>
+        selectedStatuses.includes(project.progress?.status ?? 'pending')
       )
     : response.projects;
   const end = limit === undefined ? undefined : offset + limit;

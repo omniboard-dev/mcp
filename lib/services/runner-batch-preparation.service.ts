@@ -141,7 +141,7 @@ export async function prepareNextRunnerProjects(
   while (nextCandidateIndex < candidates.length && summary.prepared < limit) {
     const { project, sizeRanking } = candidates[nextCandidateIndex];
     nextCandidateIndex += 1;
-    const initialStatus = project.progress?.status ?? null;
+    const initialStatus = project.progress?.status ?? 'pending';
 
     const unavailableReason = dependencies.isWorkspacePreparationInProgress(
       options.runKey,

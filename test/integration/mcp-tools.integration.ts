@@ -225,6 +225,52 @@ assert(!('prompt' in filteredList.run));
 assert(!('prompt' in filteredList.check));
 assert(!('agenticRuns' in filteredList.check));
 
+const pendingWithoutStoredProgress = {
+  ...project('project-pending', 'failed'),
+  progress: null,
+};
+const pendingWithoutStoredProgressList = createAgenticRunProjectList(
+  {
+    check: {
+      name: 'icon-registry',
+      type: 'regex',
+      description: null,
+      agentic: true,
+      prompt: 'Large migration prompt',
+    },
+    run,
+    runs: [run],
+    projects: [pendingWithoutStoredProgress],
+    total: 1,
+    totalsByFulfillment: fulfillmentTotals({ fulfilled: 1 }),
+  },
+  { statuses: ['pending'] }
+);
+assert.equal(pendingWithoutStoredProgressList.total, 1);
+assert.equal(
+  pendingWithoutStoredProgressList.projects[0].name,
+  pendingWithoutStoredProgress.name
+);
+
+const pendingWithoutStoredProgressBatch = await prepareNextRunnerProjects(
+  { runKey: run.runKey, statuses: ['pending'], limit: 1 },
+  {
+    listProjects: async () => pendingWithoutStoredProgressList,
+    isWorkspacePreparationInProgress: () => false,
+    hasActiveExecutionLease: () => false,
+    prepareWorkspace: async ({ projectName }) =>
+      preparation(projectName, 'continue', true),
+  }
+);
+assert.equal(
+  pendingWithoutStoredProgressBatch.results[0].projectName,
+  pendingWithoutStoredProgress.name
+);
+assert.equal(
+  pendingWithoutStoredProgressBatch.results[0].initialStatus,
+  'pending'
+);
+
 const batchCandidates = createAgenticRunProjectList(
   {
     check: {
