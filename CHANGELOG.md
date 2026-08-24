@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.1.32](https://github.com/omniboard-dev/mcp/compare/v0.1.31...v0.1.32) (2026-08-24)
+
+
+### Features
+
+* **runner:** prepare targeted pending projects ([bcc8f10](https://github.com/omniboard-dev/mcp/commit/bcc8f10017d370c8d90100ce53420c17ba5a1cd3))
+
 ### [0.1.31](https://github.com/omniboard-dev/mcp/compare/v0.1.30...v0.1.31) (2026-08-21)
 
 
