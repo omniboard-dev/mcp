@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.1.35](https://github.com/omniboard-dev/mcp/compare/v0.1.34...v0.1.35) (2026-08-25)
+
+
+### Bug Fixes
+
+* **runner:** match progress API contract ([b03b81f](https://github.com/omniboard-dev/mcp/commit/b03b81f8781fbb66fe59def12334e5b0b8e930fa))
+
 ### [0.1.34](https://github.com/omniboard-dev/mcp/compare/v0.1.33...v0.1.34) (2026-08-24)
 
 
