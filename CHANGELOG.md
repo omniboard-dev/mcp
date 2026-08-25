@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.1.36](https://github.com/omniboard-dev/mcp/compare/v0.1.35...v0.1.36) (2026-08-25)
+
+
+### Bug Fixes
+
+* **runner:** add bounded batching and watchdog recovery ([7235df7](https://github.com/omniboard-dev/mcp/commit/7235df76819af9cf93d78e2ce591f5cb8307d426))
+
 ### [0.1.35](https://github.com/omniboard-dev/mcp/compare/v0.1.34...v0.1.35) (2026-08-25)
 
 
