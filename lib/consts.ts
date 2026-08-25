@@ -10,4 +10,5 @@ export const MCP_CLI_RUN_PROJECT_PROVIDER_SNAPSHOT_ENDPOINT =
   'mcp-cli/run-project-state/provider-snapshot';
 export const MCP_CLI_REPOSITORY_ACCESS_ENDPOINT = 'mcp-cli/repository-access';
 export const MCP_CLI_PROGRESS_ENDPOINT = 'mcp-cli/progress';
+export const MCP_CLI_PROGRESS_BULK_ENDPOINT = 'mcp-cli/progress/bulk';
 export const MCP_CLI_RUN_EXECUTIONS_ENDPOINT = 'mcp-cli/run-executions';

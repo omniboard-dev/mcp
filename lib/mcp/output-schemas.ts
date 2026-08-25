@@ -152,6 +152,40 @@ export const progressReportOutputSchema = z
   })
   .passthrough();
 
+export const progressBulkReportOutputSchema = z
+  .object({
+    total: z.number().int().nonnegative(),
+    successCount: z.number().int().nonnegative(),
+    errorCount: z.number().int().nonnegative(),
+    pageCount: z.number().int().nonnegative(),
+    verifiedCount: z.number().int().nonnegative(),
+    residualCount: z.number().int().nonnegative(),
+    residuals: z.array(
+      z.object({
+        index: z.number().int().nonnegative(),
+        runKey: z.string(),
+        projectName: z.string(),
+        expectedStatus: z.enum(AGENTIC_RUN_PROGRESS_STATUS_VALUES),
+        actualStatus: z.enum(AGENTIC_RUN_PROGRESS_STATUS_VALUES).nullable(),
+        verificationError: z.string().optional(),
+      })
+    ),
+    results: z.array(
+      z
+        .object({
+          index: z.number().int().nonnegative(),
+          runKey: z.string(),
+          projectName: z.string(),
+          status: z.enum(['success', 'error']),
+          id: z.number().int().nullable().optional(),
+          changed: z.boolean().optional(),
+          error: z.string().optional(),
+        })
+        .passthrough()
+    ),
+  })
+  .passthrough();
+
 export const runnerAgenticRunsOutputSchema = z
   .object({
     runs: z.array(agenticRunSummaryOutputSchema),
@@ -246,6 +280,17 @@ export const agenticRunValidationOutputSchema = z
     generatedJsonCleanedUp: z.boolean(),
     continuation: continuationOutputSchema.optional(),
     progressReport: progressReportOutputSchema.optional(),
+  })
+  .passthrough();
+
+export const runnerExecutionHeartbeatOutputSchema = z
+  .object({
+    runKey: z.string(),
+    projectName: z.string(),
+    executionKey: z.string(),
+    heartbeatAt: z.string(),
+    workStaleAfter: z.string(),
+    executionBudgetEndsAt: z.string(),
   })
   .passthrough();
 

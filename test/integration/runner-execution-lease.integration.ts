@@ -12,6 +12,7 @@ const executions = new Map<string, any>();
 const leaseTokens = new Map<string, string>();
 const acquireBodies: any[] = [];
 const releaseRequests: string[] = [];
+const progressReports: any[] = [];
 
 interface FakeTimer {
   callback: () => void;
@@ -37,6 +38,11 @@ try {
   globalThis.fetch = (async (input, init) => {
     const url = new URL(String(input));
     const body = init?.body ? JSON.parse(String(init.body)) : {};
+
+    if (url.pathname === '/mcp-cli/progress') {
+      progressReports.push(body);
+      return jsonResponse({ changed: true, row: body });
+    }
 
     if (url.pathname.endsWith('/acquire')) {
       acquireBodies.push(body);
@@ -81,10 +87,13 @@ try {
 
   process.env.OMNIBOARD_API_KEY_MCP_CLI = 'lease-test-key';
   process.env.OMNIBOARD_API_URL = 'http://runner.test';
+  process.env.OMNIBOARD_RUNNER_WORK_HEARTBEAT_TIMEOUT_MS = '300000';
+  process.env.OMNIBOARD_RUNNER_EXECUTION_BUDGET_MS = '600000';
 
   const {
     acquireRunnerExecution,
     checkpointRunnerExecution,
+    heartbeatRunnerExecution,
     releaseAllRunnerExecutions,
     releaseRunnerExecution,
     releaseRunnerExecutionByIdentity,
@@ -167,6 +176,43 @@ try {
   assert.equal('leaseToken' in acquireBodies.at(-1), false);
   await releaseRunnerExecution(reacquiredExpired.executionKey);
 
+  const heartbeatExecution = await acquireRunnerExecution(
+    acquireInput('run-heartbeat')
+  );
+  const heartbeatTimer = timers.at(-1)!;
+  renewResult = 'success';
+  for (let minute = 1; minute <= 4; minute += 1) {
+    now += 60_000;
+    await trigger(heartbeatTimer);
+  }
+  const heartbeat = heartbeatRunnerExecution('run-heartbeat', 'project-a');
+  assert.equal(heartbeat.executionKey, heartbeatExecution.executionKey);
+  assert.equal(
+    Date.parse(heartbeat.workStaleAfter) - Date.parse(heartbeat.heartbeatAt),
+    5 * 60_000
+  );
+  await releaseRunnerExecution(heartbeatExecution.executionKey);
+
+  const staleExecution = await acquireRunnerExecution(
+    acquireInput('run-stale-work')
+  );
+  const staleTimer = timers.at(-1)!;
+  for (let minute = 1; minute <= 5; minute += 1) {
+    now += 60_000;
+    await trigger(staleTimer);
+  }
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(staleTimer.cleared, true);
+  assert(releaseRequests.includes(staleExecution.executionKey));
+  assert.deepEqual(
+    progressReports.at(-1),
+    expectProgressRequeue('run-stale-work', 'work_heartbeat_stale')
+  );
+  await assert.rejects(
+    checkpointRunnerExecution(staleExecution, { phase: 'preparing' }),
+    /is not leased by this MCP CLI process/
+  );
+
   const shutdownA = await acquireRunnerExecution(
     acquireInput('run-shutdown-a')
   );
@@ -187,6 +233,25 @@ try {
   globalThis.setInterval = originalSetInterval;
   globalThis.clearInterval = originalClearInterval;
   Date.now = originalDateNow;
+  delete process.env.OMNIBOARD_RUNNER_WORK_HEARTBEAT_TIMEOUT_MS;
+  delete process.env.OMNIBOARD_RUNNER_EXECUTION_BUDGET_MS;
+}
+
+function expectProgressRequeue(runKey: string, watchdogReason: string) {
+  return {
+    runKey,
+    projectName: 'project-a',
+    status: 'pending_retry',
+    error: 'Runner execution received no work heartbeat for 5 minutes.',
+    notes:
+      'The MCP watchdog stopped renewing the lease and retained the workspace for a bounded retry.',
+    metadata: {
+      executionMode: 'dedicated-runner',
+      watchdogReason,
+      executionKey: progressReports.at(-1).metadata.executionKey,
+    },
+    lastUpdateSource: 'mcp-cli',
+  };
 }
 
 function acquireInput(runKey: string) {

@@ -280,7 +280,9 @@ export async function runWorkspaceRecoveryIntegration(context: any) {
     'conflicts'
   );
 
-  state.mergeRequestLookupFailures = 1;
+  // Exhaust the provider GET retry budget so recovery after a persistent
+  // lookup failure remains covered independently of transient retry coverage.
+  state.mergeRequestLookupFailures = 3;
   let conflictFinalized;
   let lookupFailureObserved = false;
   let needsConflictResolution = true;

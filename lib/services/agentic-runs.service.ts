@@ -5,6 +5,7 @@ import {
   AgenticRunMatchedProjectsResponse,
   AgenticRunPipelineRetryResult,
   AgenticRunProjectListView,
+  AgenticRunProgressBulkResponse,
   AgenticRunProgressReportResult,
   AgenticRunProgressStatus,
   AgenticRunProgressUpsertInput,
@@ -42,6 +43,12 @@ export interface ReportAgenticRunProgressOptions {
   notes?: string | null;
   verification?: Record<string, unknown> | null;
   metadata?: Record<string, unknown> | null;
+}
+
+export interface ReportRunnerAgenticRunProgressBulkItem
+  extends ReportAgenticRunProgressOptions {
+  runKey: string;
+  projectName: string;
 }
 
 export interface ListAgenticRunProjectsOptions {
@@ -286,8 +293,38 @@ export async function reportRunnerAgenticRunProgress(
   projectName: string,
   options: ReportAgenticRunProgressOptions = {}
 ): Promise<AgenticRunProgressReportResult> {
+  const payload = createRunnerAgenticRunProgressPayload(
+    runKey,
+    projectName,
+    options
+  );
+  const response = await api.upsertAgenticRunProgress(payload);
+
+  return {
+    ok: true,
+    changed: response.changed,
+    payload,
+    response,
+  };
+}
+
+export function reportRunnerAgenticRunProgressBulk(
+  items: ReportRunnerAgenticRunProgressBulkItem[]
+): Promise<AgenticRunProgressBulkResponse> {
+  return api.upsertAgenticRunProgressBulk(
+    items.map(({ runKey, projectName, ...options }) =>
+      createRunnerAgenticRunProgressPayload(runKey, projectName, options)
+    )
+  );
+}
+
+function createRunnerAgenticRunProgressPayload(
+  runKey: string,
+  projectName: string,
+  options: ReportAgenticRunProgressOptions
+): AgenticRunProgressUpsertInput {
   assertValidResolution(options);
-  const payload = withoutUndefined({
+  return withoutUndefined({
     runKey,
     projectName,
     status: options.status,
@@ -312,14 +349,6 @@ export async function reportRunnerAgenticRunProgress(
     },
     lastUpdateSource: 'mcp-cli',
   });
-  const response = await api.upsertAgenticRunProgress(payload);
-
-  return {
-    ok: true,
-    changed: response.changed,
-    payload,
-    response,
-  };
 }
 
 export async function reportRunnerAgenticRunProgressSafely(

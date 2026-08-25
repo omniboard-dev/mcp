@@ -9,7 +9,18 @@ import {
 } from '../interface.js';
 import * as api from './api.service.js';
 
-const LEASE_RENEWAL_INTERVAL_MS = 30_000;
+const LEASE_RENEWAL_INTERVAL_MS = readPositiveDuration(
+  process.env.OMNIBOARD_RUNNER_LEASE_RENEWAL_INTERVAL_MS,
+  30_000
+);
+const WORK_HEARTBEAT_TIMEOUT_MS = readPositiveDuration(
+  process.env.OMNIBOARD_RUNNER_WORK_HEARTBEAT_TIMEOUT_MS,
+  15 * 60 * 1000
+);
+const EXECUTION_BUDGET_MS = readPositiveDuration(
+  process.env.OMNIBOARD_RUNNER_EXECUTION_BUDGET_MS,
+  60 * 60 * 1000
+);
 const RUNNER_EXECUTION_LEASE_CONFLICT_MESSAGE =
   'Runner execution is leased by another MCP CLI process';
 const leaseOwner = `${os.hostname().slice(0, 48)}:${
@@ -19,8 +30,13 @@ const leaseOwner = `${os.hostname().slice(0, 48)}:${
 interface ActiveLease {
   executionKey: string;
   identity: string;
+  runKey: string;
+  projectName: string;
   token: string;
   expiresAt: number;
+  acquiredAt: number;
+  lastWorkActivityAt: number;
+  renewalInFlight: boolean;
   timer: NodeJS.Timeout;
 }
 
@@ -65,6 +81,8 @@ export async function acquireRunnerExecution(
     });
   registerLease(
     identity,
+    input.runKey,
+    input.projectName,
     response.execution.executionKey,
     response.leaseToken,
     response.execution.leaseExpiresAt
@@ -83,20 +101,27 @@ export async function checkpointRunnerExecution(
     recovery?: RunnerWorkspaceState['recovery'] | null;
   }
 ): Promise<RunnerExecution> {
-  return api.checkpointRunnerExecution(execution.executionKey, {
+  const updated = await api.checkpointRunnerExecution(execution.executionKey, {
     leaseToken: requireLease(execution.executionKey).token,
     expectedStateVersion: execution.stateVersion,
     ...patch,
   });
+  markWorkActivity(execution.executionKey);
+  return updated;
 }
 
 export async function reinitializeRunnerExecution(
   execution: RunnerExecution
 ): Promise<RunnerExecution> {
-  return api.reinitializeRunnerExecution(execution.executionKey, {
-    leaseToken: requireLease(execution.executionKey).token,
-    expectedStateVersion: execution.stateVersion,
-  });
+  const updated = await api.reinitializeRunnerExecution(
+    execution.executionKey,
+    {
+      leaseToken: requireLease(execution.executionKey).token,
+      expectedStateVersion: execution.stateVersion,
+    }
+  );
+  markWorkActivity(execution.executionKey);
+  return updated;
 }
 
 export async function writeRunnerState(
@@ -114,6 +139,7 @@ export async function writeRunnerState(
     recovery: state.recovery ?? null,
   });
   applyExecutionToWorkspace(state, execution);
+  markWorkActivity(state.executionKey);
 }
 
 export async function completeRunnerExecutionByIdentity(
@@ -210,6 +236,42 @@ export function hasActiveRunnerExecutionLease(
   return executionKey ? Boolean(getActiveLease(executionKey)) : false;
 }
 
+export interface RunnerExecutionHeartbeatResult {
+  runKey: string;
+  projectName: string;
+  executionKey: string;
+  heartbeatAt: string;
+  workStaleAfter: string;
+  executionBudgetEndsAt: string;
+}
+
+export function heartbeatRunnerExecution(
+  runKey: string,
+  projectName: string
+): RunnerExecutionHeartbeatResult {
+  const executionKey = executionKeysByIdentity.get(
+    executionIdentity(runKey, projectName)
+  );
+  const lease = executionKey ? getActiveLease(executionKey) : undefined;
+  if (!lease) {
+    throw new Error(
+      `Runner execution for "${runKey}/${projectName}" is not leased by this MCP CLI process.`
+    );
+  }
+  const now = Date.now();
+  lease.lastWorkActivityAt = now;
+  return {
+    runKey,
+    projectName,
+    executionKey: lease.executionKey,
+    heartbeatAt: new Date(now).toISOString(),
+    workStaleAfter: new Date(now + WORK_HEARTBEAT_TIMEOUT_MS).toISOString(),
+    executionBudgetEndsAt: new Date(
+      lease.acquiredAt + EXECUTION_BUDGET_MS
+    ).toISOString(),
+  };
+}
+
 export function createRunnerWorkspaceState(
   execution: RunnerExecution,
   localPath: string,
@@ -275,11 +337,14 @@ function applyExecutionToWorkspace(
 
 function registerLease(
   identity: string,
+  runKey: string,
+  projectName: string,
   executionKey: string,
   token: string,
   leaseExpiresAt: string | null
 ) {
   const expiresAt = parseLeaseExpiry(leaseExpiresAt);
+  const now = Date.now();
   const existing = activeLeases.get(executionKey);
   if (existing) clearInterval(existing.timer);
 
@@ -291,8 +356,13 @@ function registerLease(
   activeLeases.set(executionKey, {
     executionKey,
     identity,
+    runKey,
+    projectName,
     token,
     expiresAt,
+    acquiredAt: existing?.acquiredAt ?? now,
+    lastWorkActivityAt: now,
+    renewalInFlight: false,
     timer,
   });
   executionKeysByIdentity.set(identity, executionKey);
@@ -310,8 +380,16 @@ function requireLease(executionKey: string) {
 
 async function renewLease(executionKey: string) {
   const lease = getActiveLease(executionKey);
-  if (!lease) return;
+  if (!lease || lease.renewalInFlight) return;
 
+  const timeoutReason = getLeaseWatchdogTimeoutReason(lease);
+  if (timeoutReason) {
+    forgetLease(executionKey);
+    void expireTimedOutLease(lease, timeoutReason);
+    return;
+  }
+
+  lease.renewalInFlight = true;
   try {
     const response = await api.renewRunnerExecution(executionKey, lease.token);
     if (activeLeases.get(executionKey) !== lease) return;
@@ -322,7 +400,27 @@ async function renewLease(executionKey: string) {
     if (isDefinitiveLeaseRejection(error) || Date.now() >= lease.expiresAt) {
       forgetLease(executionKey);
     }
+  } finally {
+    if (activeLeases.get(executionKey) === lease) {
+      lease.renewalInFlight = false;
+    }
   }
+}
+
+function markWorkActivity(executionKey: string) {
+  const lease = activeLeases.get(executionKey);
+  if (lease) lease.lastWorkActivityAt = Date.now();
+}
+
+function getLeaseWatchdogTimeoutReason(lease: ActiveLease) {
+  const now = Date.now();
+  if (now - lease.acquiredAt >= EXECUTION_BUDGET_MS) {
+    return 'execution_budget_exhausted' as const;
+  }
+  if (now - lease.lastWorkActivityAt >= WORK_HEARTBEAT_TIMEOUT_MS) {
+    return 'work_heartbeat_stale' as const;
+  }
+  return undefined;
 }
 
 function getActiveLease(executionKey: string) {
@@ -332,6 +430,64 @@ function getActiveLease(executionKey: string) {
     return undefined;
   }
   return lease;
+}
+
+async function expireTimedOutLease(
+  lease: ActiveLease,
+  reason: 'execution_budget_exhausted' | 'work_heartbeat_stale'
+) {
+  const timeoutMs =
+    reason === 'execution_budget_exhausted'
+      ? EXECUTION_BUDGET_MS
+      : WORK_HEARTBEAT_TIMEOUT_MS;
+  const message =
+    reason === 'execution_budget_exhausted'
+      ? `Runner execution exceeded its ${formatDuration(
+          timeoutMs
+        )} work budget.`
+      : `Runner execution received no work heartbeat for ${formatDuration(
+          timeoutMs
+        )}.`;
+  const errors: string[] = [];
+
+  try {
+    await api.releaseRunnerExecution(lease.executionKey, lease.token);
+  } catch (error) {
+    errors.push(
+      `lease release: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+
+  try {
+    await api.upsertAgenticRunProgress({
+      runKey: lease.runKey,
+      projectName: lease.projectName,
+      status: 'pending_retry',
+      error: message,
+      notes:
+        'The MCP watchdog stopped renewing the lease and retained the workspace for a bounded retry.',
+      metadata: {
+        executionMode: 'dedicated-runner',
+        watchdogReason: reason,
+        executionKey: lease.executionKey,
+      },
+      lastUpdateSource: 'mcp-cli',
+    });
+  } catch (error) {
+    errors.push(
+      `progress requeue: ${
+        error instanceof Error ? error.message : String(error)
+      }`
+    );
+  }
+
+  if (errors.length) {
+    console.error(
+      `Runner watchdog cleanup failed for ${lease.runKey}/${
+        lease.projectName
+      }: ${errors.join('; ')}`
+    );
+  }
 }
 
 function parseLeaseExpiry(value: string | null) {
@@ -367,6 +523,18 @@ function forgetLease(executionKey: string) {
   if (executionKeysByIdentity.get(lease.identity) === executionKey) {
     executionKeysByIdentity.delete(lease.identity);
   }
+}
+
+function readPositiveDuration(value: string | undefined, fallback: number) {
+  const parsed = value ? Number.parseInt(value, 10) : NaN;
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function formatDuration(durationMs: number) {
+  if (durationMs % 60_000 === 0) {
+    return `${durationMs / 60_000} minutes`;
+  }
+  return `${durationMs}ms`;
 }
 
 function executionIdentity(runKey: string, projectName: string) {

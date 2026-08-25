@@ -145,7 +145,9 @@ export async function runPostMergeRequestContinuationIntegration(context: any) {
     },
   ];
   state.providerSyncSuccess = false;
-  state.bitbucketPullRequestLookupFailures = 1;
+  // Exhaust the provider GET retry budget before exercising the local
+  // provider-snapshot fallback path.
+  state.bitbucketPullRequestLookupFailures = 3;
   const failedLocalFallbackContinuation = await prepareRunnerWorkspace({
     runKey: 'run-icons',
     projectName: 'project-a',

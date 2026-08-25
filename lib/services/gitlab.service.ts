@@ -1,4 +1,5 @@
 import { GitlabRepositoryAccess } from '../interface.js';
+import { fetchWithTimeout } from './http.service.js';
 import {
   isLocalTransportAllowed,
   isLoopbackHostname,
@@ -56,7 +57,7 @@ export async function validateGitlabProjectAccess(
     apiBaseUrl
   );
   const endpoint = `${apiBaseUrl}/projects/${encodeURIComponent(projectPath)}`;
-  const response = await fetch(endpoint, {
+  const response = await fetchWithTimeout(endpoint, {
     headers: { 'PRIVATE-TOKEN': access.token },
   });
 
@@ -84,7 +85,7 @@ export async function validateGitlabProjectAccess(
   }
 
   const graphQlUrl = resolveGitlabGraphQlUrl(apiBaseUrl);
-  const permissionResponse = await fetch(graphQlUrl, {
+  const permissionResponse = await fetchWithTimeout(graphQlUrl, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -145,7 +146,7 @@ export async function createGitlabMergeRequest(
   const endpoint = `${apiBaseUrl}/projects/${encodeURIComponent(
     normalizedProjectPath
   )}/merge_requests`;
-  const response = await fetch(endpoint, {
+  const response = await fetchWithTimeout(endpoint, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -199,7 +200,7 @@ export async function getGitlabMergeRequestDetails(
     )}/merge_requests/${mergeRequestIid}`
   );
   endpoint.searchParams.set('include_rebase_in_progress', 'true');
-  const response = await fetch(endpoint, {
+  const response = await fetchWithTimeout(endpoint, {
     headers: { 'PRIVATE-TOKEN': access.token },
   });
   if (!response.ok) {
@@ -242,7 +243,7 @@ export async function requestGitlabMergeRequestRebase(
   const endpoint = `${apiBaseUrl}/projects/${encodeURIComponent(
     normalizedProjectPath
   )}/merge_requests/${mergeRequestIid}/rebase`;
-  const response = await fetch(endpoint, {
+  const response = await fetchWithTimeout(endpoint, {
     method: 'PUT',
     headers: { 'PRIVATE-TOKEN': access.token },
   });
@@ -297,7 +298,7 @@ export async function retryGitlabPipeline(
   const endpoint = `${apiBaseUrl}/projects/${encodeURIComponent(
     projectPath
   )}/pipelines/${pipelineId}/retry`;
-  const response = await fetch(endpoint, {
+  const response = await fetchWithTimeout(endpoint, {
     method: 'POST',
     headers: { 'PRIVATE-TOKEN': access.token },
   });
@@ -331,7 +332,7 @@ async function findOpenMergeRequest(
   url.searchParams.set('state', 'opened');
   url.searchParams.set('source_branch', sourceBranch);
   url.searchParams.set('target_branch', targetBranch);
-  const response = await fetch(url, {
+  const response = await fetchWithTimeout(url, {
     headers: { 'PRIVATE-TOKEN': token },
   });
 

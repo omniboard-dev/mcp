@@ -2,6 +2,7 @@ import {
   DEFAULT_API_URL,
   MCP_CLI_CHECKS_ENDPOINT,
   MCP_CLI_MATCHED_PROJECTS_ENDPOINT,
+  MCP_CLI_PROGRESS_BULK_ENDPOINT,
   MCP_CLI_PROGRESS_ENDPOINT,
   MCP_CLI_REPOSITORY_ACCESS_ENDPOINT,
   MCP_CLI_RUN_ENDPOINT,
@@ -13,6 +14,8 @@ import {
 } from '../consts.js';
 import {
   AGENTIC_RUN_PROJECT_FULFILLMENT_VALUES,
+  AgenticRunMatchedProject,
+  AgenticRunProgressBulkResponse,
   AgenticRunProgressUpsertInput,
   AgenticRunProgressUpsertResponse,
   AgenticRunProjectFulfillment,
@@ -39,6 +42,11 @@ import {
 
 let apiUrl: string;
 let apiKey: string;
+
+const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
+const DEFAULT_IDEMPOTENT_RETRIES = 2;
+const MAX_PROGRESS_BULK_PAGE_SIZE = 25;
+const RETRYABLE_HTTP_STATUSES = new Set([408, 425, 429, 500, 502, 503, 504]);
 
 export function createApiService() {
   const key = process.env.OMNIBOARD_API_KEY_MCP_CLI;
@@ -224,6 +232,188 @@ export const upsertAgenticRunProgress = (
     body: JSON.stringify(progress),
   });
 
+export async function upsertAgenticRunProgressBulk(
+  items: AgenticRunProgressUpsertInput[]
+): Promise<AgenticRunProgressBulkResponse> {
+  const results: AgenticRunProgressBulkResponse['results'] = [];
+  const ambiguousIndexes = new Set<number>();
+  let successCount = 0;
+  let errorCount = 0;
+
+  for (
+    let offset = 0;
+    offset < items.length;
+    offset += MAX_PROGRESS_BULK_PAGE_SIZE
+  ) {
+    const pageItems = items.slice(offset, offset + MAX_PROGRESS_BULK_PAGE_SIZE);
+    try {
+      const page = await request<
+        Pick<
+          AgenticRunProgressBulkResponse,
+          'successCount' | 'errorCount' | 'results'
+        >
+      >(MCP_CLI_PROGRESS_BULK_ENDPOINT, {
+        method: 'PUT',
+        body: JSON.stringify({ items: pageItems }),
+      });
+      successCount += page.successCount;
+      errorCount += page.errorCount;
+      results.push(
+        ...page.results.map((result) => ({
+          ...result,
+          index: offset + result.index,
+        }))
+      );
+    } catch (error) {
+      errorCount += pageItems.length;
+      if (isAmbiguousBulkRequestFailure(error)) {
+        pageItems.forEach((_item, index) =>
+          ambiguousIndexes.add(offset + index)
+        );
+      }
+      results.push(
+        ...pageItems.map((item, index) => ({
+          index: offset + index,
+          runKey: item.runKey,
+          projectName: item.projectName,
+          status: 'error' as const,
+          error: error instanceof Error ? error.message : String(error),
+        }))
+      );
+    }
+  }
+
+  const verification = await verifyBulkProgress(
+    items,
+    results,
+    ambiguousIndexes
+  );
+  successCount += verification.recoveredCount;
+  errorCount -= verification.recoveredCount;
+  successCount -= verification.regressedCount;
+  errorCount += verification.regressedCount;
+
+  return {
+    total: items.length,
+    successCount,
+    errorCount,
+    pageCount: Math.ceil(items.length / MAX_PROGRESS_BULK_PAGE_SIZE),
+    verifiedCount: verification.verifiedCount,
+    residualCount: verification.residuals.length,
+    residuals: verification.residuals,
+    results,
+  };
+}
+
+async function verifyBulkProgress(
+  items: AgenticRunProgressUpsertInput[],
+  results: AgenticRunProgressBulkResponse['results'],
+  ambiguousIndexes: Set<number>
+) {
+  const residuals: AgenticRunProgressBulkResponse['residuals'] = [];
+  const itemsByRun = new Map<
+    string,
+    Array<{
+      index: number;
+      item: AgenticRunProgressUpsertInput;
+    }>
+  >();
+  items.forEach((item, index) => {
+    if (!item.status) return;
+    const runItems = itemsByRun.get(item.runKey) ?? [];
+    runItems.push({ index, item });
+    itemsByRun.set(item.runKey, runItems);
+  });
+
+  let verifiedCount = 0;
+  let recoveredCount = 0;
+  let regressedCount = 0;
+  for (const [runKey, runItems] of itemsByRun) {
+    let projects: AgenticRunMatchedProject[];
+    try {
+      projects = (await getAgenticRunMatchedProjects({ runKey })).projects;
+    } catch (error) {
+      const verificationError =
+        error instanceof Error ? error.message : String(error);
+      residuals.push(
+        ...runItems.map(({ index, item }) => ({
+          index,
+          runKey,
+          projectName: item.projectName,
+          expectedStatus: normalizeReportedStatus(item.status!),
+          actualStatus: null,
+          verificationError,
+        }))
+      );
+      continue;
+    }
+
+    const statusByProject = new Map(
+      projects.map((project) => [
+        project.name,
+        project.progress?.status ?? null,
+      ])
+    );
+    for (const { index, item } of runItems) {
+      const expectedStatus = normalizeReportedStatus(item.status!);
+      const actualStatus = statusByProject.get(item.projectName) ?? null;
+      const result = results.find((candidate) => candidate.index === index);
+      if (actualStatus === expectedStatus) {
+        if (result?.status === 'success') {
+          verifiedCount += 1;
+        } else if (result && ambiguousIndexes.has(index)) {
+          verifiedCount += 1;
+          result.status = 'success';
+          delete result.error;
+          recoveredCount += 1;
+        } else {
+          residuals.push({
+            index,
+            runKey,
+            projectName: item.projectName,
+            expectedStatus,
+            actualStatus,
+            verificationError:
+              'The bulk item was explicitly rejected; matching status alone cannot verify its other fields.',
+          });
+        }
+        continue;
+      }
+
+      residuals.push({
+        index,
+        runKey,
+        projectName: item.projectName,
+        expectedStatus,
+        actualStatus,
+      });
+      if (result?.status === 'success') {
+        result.status = 'error';
+        result.error = `Progress verification expected "${expectedStatus}" but found "${
+          actualStatus ?? 'missing'
+        }".`;
+        delete result.changed;
+        regressedCount += 1;
+      }
+    }
+  }
+
+  return { verifiedCount, recoveredCount, regressedCount, residuals };
+}
+
+function normalizeReportedStatus(
+  status: NonNullable<AgenticRunProgressUpsertInput['status']>
+) {
+  return status === 'merged' ? 'done' : status;
+}
+
+function isAmbiguousBulkRequestFailure(error: unknown) {
+  return (
+    error instanceof OmniboardApiError &&
+    (error.status === 0 || RETRYABLE_HTTP_STATUSES.has(error.status))
+  );
+}
+
 export const acquireRunnerExecution = (input: {
   runKey: string;
   projectName: string;
@@ -326,15 +516,25 @@ export const releaseRunnerExecution = (
 type QueryValue = string | number | boolean | null | undefined;
 
 export class OmniboardApiError extends Error {
-  constructor(message: string, readonly status: number) {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly requestId?: string
+  ) {
     super(message);
     this.name = 'OmniboardApiError';
   }
 }
 
+type ApiRequestInit = RequestInit & {
+  query?: Record<string, QueryValue>;
+  retry?: boolean;
+  timeoutMs?: number;
+};
+
 async function request<T>(
   endpoint: string,
-  init: RequestInit & { query?: Record<string, QueryValue> } = {}
+  init: ApiRequestInit = {}
 ): Promise<T> {
   if (!apiKey || !apiUrl) {
     createApiService();
@@ -347,32 +547,116 @@ async function request<T>(
     }
   });
 
-  const { query, ...requestInit } = init;
-  const response = await fetch(url, {
-    ...requestInit,
-    headers: {
-      'Content-Type': 'application/json',
-      'omniboard-api-key': apiKey,
-      ...requestInit.headers,
-    },
-  });
+  const { query, retry, timeoutMs, ...requestInit } = init;
+  const method = requestInit.method?.toUpperCase() ?? 'GET';
+  const operation = `${method} ${url.origin}${url.pathname}`;
+  const shouldRetry = retry ?? ['GET', 'HEAD', 'PUT'].includes(method);
+  const maxAttempts =
+    1 +
+    (shouldRetry
+      ? readNonNegativeInteger(
+          process.env.OMNIBOARD_API_IDEMPOTENT_RETRIES,
+          DEFAULT_IDEMPOTENT_RETRIES
+        )
+      : 0);
 
-  if (!response.ok) {
-    let body: any;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const controller = new AbortController();
+    const requestTimeoutMs =
+      timeoutMs ??
+      readPositiveInteger(
+        process.env.OMNIBOARD_API_REQUEST_TIMEOUT_MS,
+        DEFAULT_REQUEST_TIMEOUT_MS
+      );
+    const timeout = setTimeout(() => controller.abort(), requestTimeoutMs);
+    timeout.unref();
+
+    let response: Response;
     try {
-      body = await response.json();
-    } catch {
-      body = undefined;
+      response = await fetch(url, {
+        ...requestInit,
+        signal: controller.signal,
+        headers: {
+          'Content-Type': 'application/json',
+          'omniboard-api-key': apiKey,
+          ...requestInit.headers,
+        },
+      });
+    } catch (error) {
+      clearTimeout(timeout);
+      if (attempt < maxAttempts) {
+        await waitBeforeRetry(attempt);
+        continue;
+      }
+      const reason = controller.signal.aborted
+        ? `timed out after ${requestTimeoutMs}ms`
+        : describeTransportError(error);
+      throw new OmniboardApiError(
+        `Omniboard API ${operation} transport failed: ${reason}`,
+        0
+      );
+    }
+    clearTimeout(timeout);
+
+    if (!response.ok) {
+      const requestId =
+        response.headers.get('x-request-id') ??
+        response.headers.get('x-cloud-trace-context') ??
+        undefined;
+      let body: any;
+      try {
+        body = await response.json();
+      } catch {
+        body = undefined;
+      }
+      const detail =
+        body?.message ??
+        `request failed with ${response.status} ${response.statusText}`;
+      const error = new OmniboardApiError(
+        `Omniboard API ${operation}: ${detail} (HTTP ${response.status}${
+          requestId ? `, request ${requestId}` : ''
+        })`,
+        response.status,
+        requestId
+      );
+      if (
+        attempt < maxAttempts &&
+        RETRYABLE_HTTP_STATUSES.has(response.status)
+      ) {
+        await waitBeforeRetry(attempt);
+        continue;
+      }
+      throw error;
     }
 
-    throw new OmniboardApiError(
-      body?.message ??
-        `Omniboard API request failed with ${response.status} ${response.statusText}`,
-      response.status
-    );
+    return (await response.json()) as T;
   }
 
-  return (await response.json()) as T;
+  throw new Error(`Omniboard API ${operation} exhausted its retry budget`);
+}
+
+function readPositiveInteger(value: string | undefined, fallback: number) {
+  const parsed = value ? Number.parseInt(value, 10) : NaN;
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function readNonNegativeInteger(value: string | undefined, fallback: number) {
+  const parsed = value ? Number.parseInt(value, 10) : NaN;
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
+function waitBeforeRetry(attempt: number) {
+  const baseDelayMs = Math.min(2_000, 250 * 2 ** (attempt - 1));
+  const jitterMs = Math.floor(Math.random() * 100);
+  return new Promise<void>((resolve) =>
+    setTimeout(resolve, baseDelayMs + jitterMs)
+  );
+}
+
+function describeTransportError(error: unknown) {
+  if (!(error instanceof Error)) return String(error);
+  const cause = error.cause as { code?: string } | undefined;
+  return cause?.code ? `${error.message} (${cause.code})` : error.message;
 }
 
 function normalizeAgenticRunsResponse(

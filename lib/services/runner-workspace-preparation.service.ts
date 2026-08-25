@@ -798,6 +798,11 @@ function createWorkspaceInstructions(
     ...continuation.instructions,
     'Inspect the existing branch and implement the smallest coherent change that resolves the check or provider failure.',
     'Run relevant tests, lint, or build commands before finalizing.',
+    'For work lasting more than 10 minutes, call omniboard_runner_heartbeat_agentic_run_workspace with runKey "' +
+      runKey +
+      '", and projectName "' +
+      projectName +
+      '" at least every 10 minutes. The MCP returns stale work to pending_retry after 15 minutes without a heartbeat and enforces a 60-minute total work budget.',
     'When ready, call omniboard_runner_finalize_agentic_run_workspace with runKey "' +
       runKey +
       '", projectName "' +

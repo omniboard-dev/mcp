@@ -6,8 +6,11 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 
 const { createStructuredToolResult } = await import('../../dist/mcp/shared.js');
-const { matchedProjectsOutputSchema, runnerWorkspaceReleaseOutputSchema } =
-  await import('../../dist/mcp/output-schemas.js');
+const {
+  matchedProjectsOutputSchema,
+  progressBulkReportOutputSchema,
+  runnerWorkspaceReleaseOutputSchema,
+} = await import('../../dist/mcp/output-schemas.js');
 const { createAgenticRunProjectList } = await import(
   '../../dist/services/agentic-runs.service.js'
 );
@@ -809,18 +812,24 @@ const apiResponse = {
   total: projects.length,
   totalsByFulfillment: fulfillmentTotals({ fulfilled: projects.length }),
 };
-const apiServer = http.createServer((request, response) => {
+const bulkProgressPageSizes: number[] = [];
+const bulkProgressStatuses = new Map<string, string>();
+let retryableBulkFailuresRemaining = 1;
+const apiServer = http.createServer(async (request, response) => {
   const url = new URL(request.url, 'http://localhost');
   response.setHeader('Content-Type', 'application/json');
   if (
     request.method === 'GET' &&
     url.pathname === '/mcp-cli/matched-projects'
   ) {
+    const fulfilledProjects = bulkProgressStatuses.size
+      ? [...bulkProgressStatuses].map(([name, status]) => project(name, status))
+      : projects;
     response.end(
       JSON.stringify({
         ...apiResponse,
         projectGroups: {
-          fulfilled: projects,
+          fulfilled: fulfilledProjects,
           unfulfilled: [
             {
               ...project('project-unfulfilled', 'pending', {}, 'unfulfilled'),
@@ -829,12 +838,61 @@ const apiServer = http.createServer((request, response) => {
           ],
           unchecked: [project('project-unchecked', 'pending', {}, 'unchecked')],
         },
-        total: projects.length + 2,
+        total: fulfilledProjects.length + 2,
         totalsByFulfillment: fulfillmentTotals({
-          fulfilled: projects.length,
+          fulfilled: fulfilledProjects.length,
           unfulfilled: 1,
           unchecked: 1,
         }),
+      })
+    );
+    return;
+  }
+  if (request.method === 'PUT' && url.pathname === '/mcp-cli/progress/bulk') {
+    let serializedBody = '';
+    for await (const chunk of request) {
+      serializedBody += chunk;
+    }
+    const body = JSON.parse(serializedBody);
+    bulkProgressPageSizes.push(body.items.length);
+    assert(body.items.length <= 25);
+    if (retryableBulkFailuresRemaining > 0) {
+      retryableBulkFailuresRemaining -= 1;
+      response.statusCode = 503;
+      response.setHeader('x-request-id', 'bulk-retry-1');
+      response.end(JSON.stringify({ message: 'Temporary bulk failure' }));
+      return;
+    }
+    for (const item of body.items) {
+      if (item.projectName !== 'explicit-error') {
+        bulkProgressStatuses.set(item.projectName, item.status);
+      }
+    }
+    const explicitErrors = body.items.filter(
+      (item) => item.projectName === 'explicit-error'
+    ).length;
+    response.end(
+      JSON.stringify({
+        successCount: body.items.length - explicitErrors,
+        errorCount: explicitErrors,
+        results: body.items.map((item, index) =>
+          item.projectName === 'explicit-error'
+            ? {
+                index,
+                runKey: item.runKey,
+                projectName: item.projectName,
+                status: 'error',
+                error: 'Explicit item validation failed.',
+              }
+            : {
+                index,
+                runKey: item.runKey,
+                projectName: item.projectName,
+                status: 'success',
+                id: index + 1,
+                changed: true,
+              }
+        ),
       })
     );
     return;
@@ -870,6 +928,8 @@ try {
   assert(names.includes('omniboard_runner_finalize_agentic_run_workspace'));
   assert(names.includes('omniboard_runner_release_agentic_run_workspace'));
   assert(names.includes('omniboard_runner_report_agentic_run_progress'));
+  assert(names.includes('omniboard_runner_report_agentic_run_progress_bulk'));
+  assert(names.includes('omniboard_runner_heartbeat_agentic_run_workspace'));
   assert(tools.every((tool) => tool.outputSchema));
 
   const projectListTool = tools.find(
@@ -978,6 +1038,63 @@ try {
   ]) {
     assert(property in progressProperties);
   }
+
+  const bulkProgress = await client.callTool({
+    name: 'omniboard_runner_report_agentic_run_progress_bulk',
+    arguments: {
+      items: Array.from({ length: 51 }, (_, index) => ({
+        runKey: run.runKey,
+        projectName: `bulk-project-${index + 1}`,
+        status: 'pending',
+        notes: 'Reset after runner bug.',
+      })),
+    },
+  });
+  assert(!bulkProgress.isError);
+  const bulkProgressContent = progressBulkReportOutputSchema.parse(
+    bulkProgress.structuredContent
+  );
+  assert.deepEqual(
+    {
+      total: bulkProgressContent.total,
+      successCount: bulkProgressContent.successCount,
+      errorCount: bulkProgressContent.errorCount,
+      pageCount: bulkProgressContent.pageCount,
+    },
+    { total: 51, successCount: 51, errorCount: 0, pageCount: 3 }
+  );
+  assert.equal(bulkProgressContent.verifiedCount, 51);
+  assert.equal(bulkProgressContent.residualCount, 0);
+  assert.deepEqual(bulkProgressPageSizes, [25, 25, 25, 1]);
+  assert.equal(bulkProgressContent.results[25].index, 25);
+  assert.equal(bulkProgressContent.results[50].index, 50);
+
+  bulkProgressStatuses.set('explicit-error', 'pending');
+  const explicitErrorProgress = await client.callTool({
+    name: 'omniboard_runner_report_agentic_run_progress_bulk',
+    arguments: {
+      items: [
+        {
+          runKey: run.runKey,
+          projectName: 'explicit-error',
+          status: 'pending',
+        },
+      ],
+    },
+  });
+  assert(!explicitErrorProgress.isError);
+  const explicitErrorContent = progressBulkReportOutputSchema.parse(
+    explicitErrorProgress.structuredContent
+  );
+  assert.equal(explicitErrorContent.successCount, 0);
+  assert.equal(explicitErrorContent.errorCount, 1);
+  assert.equal(explicitErrorContent.verifiedCount, 0);
+  assert.equal(explicitErrorContent.residualCount, 1);
+  assert.equal(explicitErrorContent.results[0].status, 'error');
+  assert.match(
+    explicitErrorContent.residuals[0].verificationError,
+    /explicitly rejected/
+  );
 
   console.log('Dedicated runner MCP CLI tool registration test passed.');
 } finally {

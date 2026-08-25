@@ -271,6 +271,7 @@ export type AgenticRunProgressStatus =
 
 export const AGENTIC_RUN_REPORTABLE_PROGRESS_STATUS_VALUES = [
   'pending',
+  'pending_retry',
   'in_progress',
   'implemented',
   'needs_input',
@@ -445,16 +446,32 @@ export interface AgenticRunProgressUpsertResponse {
 
 export interface AgenticRunProgressBulkResponse {
   total: number;
-  succeeded: number;
-  failed: number;
+  successCount: number;
+  errorCount: number;
+  pageCount: number;
+  verifiedCount: number;
+  residualCount: number;
+  residuals: AgenticRunProgressBulkResidual[];
   results: AgenticRunProgressBulkRowResult[];
 }
 
 export interface AgenticRunProgressBulkRowResult {
   index: number;
-  success: boolean;
-  result?: AgenticRunProgressUpsertResponse;
+  runKey: string;
+  projectName: string;
+  status: 'success' | 'error';
+  id?: number | null;
+  changed?: boolean;
   error?: string;
+}
+
+export interface AgenticRunProgressBulkResidual {
+  index: number;
+  runKey: string;
+  projectName: string;
+  expectedStatus: AgenticRunProgressStatus;
+  actualStatus: AgenticRunProgressStatus | null;
+  verificationError?: string;
 }
 
 export interface AgenticRunProgressReportResult {

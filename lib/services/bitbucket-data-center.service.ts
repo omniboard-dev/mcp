@@ -1,4 +1,5 @@
 import { BitbucketDataCenterRepositoryAccess } from '../interface.js';
+import { fetchWithTimeout } from './http.service.js';
 import {
   isLocalTransportAllowed,
   isLoopbackHostname,
@@ -40,9 +41,12 @@ export async function validateBitbucketRepositoryAccess(
 ) {
   const apiBaseUrl = resolveBitbucketApiBaseUrl(access.apiBaseUrl);
   const identity = resolveBitbucketRepositoryIdentity(repositoryUrl);
-  const response = await fetch(repositoryEndpoint(apiBaseUrl, identity), {
-    headers: bitbucketHeaders(access),
-  });
+  const response = await fetchWithTimeout(
+    repositoryEndpoint(apiBaseUrl, identity),
+    {
+      headers: bitbucketHeaders(access),
+    }
+  );
 
   if (!response.ok) {
     throw new Error(
@@ -82,7 +86,7 @@ export async function createBitbucketPullRequest(
     slug: identity.repositorySlug,
     project: { key: identity.projectKey },
   };
-  const response = await fetch(endpoint, {
+  const response = await fetchWithTimeout(endpoint, {
     method: 'POST',
     headers: {
       ...bitbucketHeaders(access),
@@ -132,7 +136,7 @@ export async function getBitbucketPullRequestDetails(
     identity
   )}/pull-requests/${pullRequestId}`;
   const headers = bitbucketHeaders(access);
-  const response = await fetch(endpoint, { headers });
+  const response = await fetchWithTimeout(endpoint, { headers });
   if (!response.ok) {
     throw new Error(
       `Bitbucket Data Center pull request lookup failed with ${
@@ -233,7 +237,7 @@ export async function requestBitbucketPullRequestRebase(
     gitApiBaseUrl,
     identity
   )}/pull-requests/${details.id}/rebase`;
-  const response = await fetch(endpoint, {
+  const response = await fetchWithTimeout(endpoint, {
     method: 'POST',
     headers: {
       ...bitbucketHeaders(access),
@@ -336,7 +340,9 @@ async function findOpenPullRequest(
   url.searchParams.set('state', 'OPEN');
   url.searchParams.set('at', `refs/heads/${targetBranch}`);
   while (true) {
-    const response = await fetch(url, { headers: bitbucketHeaders(access) });
+    const response = await fetchWithTimeout(url, {
+      headers: bitbucketHeaders(access),
+    });
     if (!response.ok) return undefined;
 
     const body = (await response.json()) as {
@@ -417,7 +423,7 @@ async function fetchOptionalJson<T>(
   endpoint: string,
   headers: Record<string, string>
 ): Promise<T | null> {
-  const response = await fetch(endpoint, { headers });
+  const response = await fetchWithTimeout(endpoint, { headers });
   return response.ok ? ((await response.json()) as T) : null;
 }
 
