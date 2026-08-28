@@ -298,9 +298,10 @@ when the same automation identity is shared by multiple workflows.
 5. Run the relevant tests, lint, or build commands inside that workspace.
 6. Call `omniboard_runner_finalize_agentic_run_workspace` separately for each
    prepared workspace, with the commit and merge request wording.
-7. Retain the checkout for inspection, or remove it after downstream
-   processing completes. A later preparation recreates a missing checkout from
-   DB execution state at a new generation.
+7. MCP CLI retains the Git checkout for inspection and recovery but removes its
+   root `node_modules` whenever work stops. A later preparation reinstalls
+   dependencies as needed, or recreates a missing checkout from DB execution
+   state at a new generation.
 
 ### Repository access and safety
 
@@ -501,7 +502,8 @@ Release behavior is:
 
 - A lease owned by the current MCP CLI process is released.
 - The renewal timer stops immediately.
-- The execution record and local workspace remain available for a later runner.
+- The workspace root `node_modules` is removed to reclaim dependency storage.
+- The execution record and Git checkout remain available for a later runner.
 - Repeated calls, or calls from a process that does not own the lease, return
   `released: false` without changing another process's lease.
 - Agentic-run progress is unchanged.
@@ -524,6 +526,11 @@ After the coding agent applies and verifies a normal change, MCP CLI:
 2. Retrieves fresh repository access and pushes the prepared branch.
 3. Creates or reuses the GitLab merge request.
 4. Reports `committed`, `pushed`, and `mr_created` milestones.
+5. Releases the execution lease and removes the workspace root `node_modules`.
+
+Failed finalization also releases the lease and removes `node_modules` after
+reporting the failure. Graceful MCP shutdown and watchdog expiry perform the
+same dependency cleanup for every workspace whose lease stops.
 
 Callers must inspect `completed`:
 

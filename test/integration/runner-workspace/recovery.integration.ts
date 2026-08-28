@@ -27,6 +27,11 @@ export async function runWorkspaceRecoveryIntegration(context: any) {
     prepared,
   } = context;
 
+  const nodeModulesPath = path.join(
+    prepared.workspace.localPath,
+    'node_modules'
+  );
+  await fs.mkdir(nodeModulesPath);
   const rejectingHook = path.join(remotePath, 'hooks', 'pre-receive');
   await fs.writeFile(rejectingHook, '#!/bin/sh\nexit 1\n', { mode: 0o700 });
   await assert.rejects(
@@ -42,8 +47,10 @@ export async function runWorkspaceRecoveryIntegration(context: any) {
   assert.equal(state.runnerExecution.leaseOwner, null);
   assert.equal(state.runnerExecution.leaseExpiresAt, null);
   assert.equal(state.runnerExecution.heartbeatAt, null);
+  await assert.rejects(fs.access(nodeModulesPath));
   await fs.rm(rejectingHook);
 
+  await fs.mkdir(nodeModulesPath);
   const finalized = await finalizeRunnerWorkspace({
     runKey: 'run-icons',
     projectName: 'project-a',
@@ -77,6 +84,7 @@ export async function runWorkspaceRecoveryIntegration(context: any) {
     state.mergeRequestPayload.description,
     '## Summary\n- Update the icon registry.\n\n## Verification\n- Tests passed.'
   );
+  await assert.rejects(fs.access(nodeModulesPath));
   const retried = await finalizeRunnerWorkspace({
     runKey: 'run-icons',
     projectName: 'project-a',

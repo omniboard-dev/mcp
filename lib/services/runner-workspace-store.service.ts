@@ -42,6 +42,20 @@ export async function runnerWorkspaceExists(localPath: string) {
   }
 }
 
+export async function removeRunnerWorkspaceNodeModules(localPath: string) {
+  const layout = await ensureRunnerLayout();
+  if (!(await runnerWorkspaceExists(localPath))) return;
+
+  const canonicalLocalPath = await assertRunnerWorkspacePath(
+    layout.workspaces,
+    localPath
+  );
+  await fs.rm(path.join(canonicalLocalPath, 'node_modules'), {
+    recursive: true,
+    force: true,
+  });
+}
+
 export async function assertRunnerWorkspacePath(
   workspaces: string,
   localPath: string

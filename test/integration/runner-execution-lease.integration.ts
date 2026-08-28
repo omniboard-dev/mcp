@@ -1,9 +1,13 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import path from 'node:path';
 
 const originalFetch = globalThis.fetch;
 const originalSetInterval = globalThis.setInterval;
 const originalClearInterval = globalThis.clearInterval;
 const originalDateNow = Date.now;
+const originalCwd = process.cwd();
+const testRoot = await fs.mkdtemp('/tmp/omniboard-runner-lease-');
 let now = Date.parse('2026-07-27T10:00:00.000Z');
 let sequence = 0;
 let renewResult: 'success' | 'network' | 'server' | 'conflict' = 'success';
@@ -21,6 +25,7 @@ interface FakeTimer {
 }
 
 try {
+  process.chdir(testRoot);
   Date.now = () => now;
   globalThis.setInterval = ((callback: () => void, delay: number) => {
     assert.equal(delay, 30_000);
@@ -94,10 +99,27 @@ try {
     acquireRunnerExecution,
     checkpointRunnerExecution,
     heartbeatRunnerExecution,
+    registerRunnerWorkspace,
     releaseAllRunnerExecutions,
     releaseRunnerExecution,
     releaseRunnerExecutionByIdentity,
   } = await import('../../dist/services/runner-execution.service.js');
+  const { ensureRunnerLayout, runnerWorkspacePath } = await import(
+    '../../dist/services/runner-workspace-store.service.js'
+  );
+  const createInstalledWorkspace = async (execution: any) => {
+    const layout = await ensureRunnerLayout();
+    const localPath = runnerWorkspacePath(
+      layout.workspaces,
+      execution.projectName,
+      execution.executionKey,
+      execution.generation
+    );
+    const nodeModulesPath = path.join(localPath, 'node_modules');
+    await fs.mkdir(nodeModulesPath, { recursive: true });
+    await registerRunnerWorkspace(execution.executionKey, localPath);
+    return nodeModulesPath;
+  };
 
   const first = await acquireRunnerExecution(acquireInput('run-transient'));
   const firstTimer = timers.at(-1)!;
@@ -122,6 +144,7 @@ try {
     acquireInput('run-release-by-identity')
   );
   const releasableTimer = timers.at(-1)!;
+  const releasableNodeModules = await createInstalledWorkspace(releasable);
   assert.deepEqual(
     await releaseRunnerExecutionByIdentity(
       'run-release-by-identity',
@@ -135,6 +158,7 @@ try {
     }
   );
   assert.equal(releasableTimer.cleared, true);
+  await assert.rejects(fs.access(releasableNodeModules));
   assert.deepEqual(
     await releaseRunnerExecutionByIdentity(
       'run-release-by-identity',
@@ -150,6 +174,7 @@ try {
 
   const rejected = await acquireRunnerExecution(acquireInput('run-rejected'));
   const rejectedTimer = timers.at(-1)!;
+  const rejectedNodeModules = await createInstalledWorkspace(rejected);
   renewResult = 'conflict';
   await trigger(rejectedTimer);
   await assert.rejects(
@@ -157,9 +182,11 @@ try {
     /is not leased by this MCP CLI process/
   );
   assert.equal(rejectedTimer.cleared, true);
+  await waitForMissing(rejectedNodeModules);
 
   const expired = await acquireRunnerExecution(acquireInput('run-expired'));
   const expiredTimer = timers.at(-1)!;
+  const expiredNodeModules = await createInstalledWorkspace(expired);
   const confirmedExpiry = Date.parse(expired.leaseExpiresAt!);
   renewResult = 'network';
   await trigger(expiredTimer);
@@ -169,6 +196,7 @@ try {
     /is not leased by this MCP CLI process/
   );
   assert.equal(expiredTimer.cleared, true);
+  await waitForMissing(expiredNodeModules);
 
   const reacquiredExpired = await acquireRunnerExecution(
     acquireInput('run-expired')
@@ -197,13 +225,15 @@ try {
     acquireInput('run-stale-work')
   );
   const staleTimer = timers.at(-1)!;
+  const staleNodeModules = await createInstalledWorkspace(staleExecution);
   for (let minute = 1; minute <= 5; minute += 1) {
     now += 60_000;
     await trigger(staleTimer);
   }
-  await new Promise<void>((resolve) => setImmediate(resolve));
+  await waitForProgressReport('run-stale-work');
   assert.equal(staleTimer.cleared, true);
   assert(releaseRequests.includes(staleExecution.executionKey));
+  await assert.rejects(fs.access(staleNodeModules));
   assert.deepEqual(
     progressReports.at(-1),
     expectProgressRequeue('run-stale-work', 'work_heartbeat_stale')
@@ -219,6 +249,10 @@ try {
   const shutdownB = await acquireRunnerExecution(
     acquireInput('run-shutdown-b')
   );
+  const shutdownNodeModules = await Promise.all([
+    createInstalledWorkspace(shutdownA),
+    createInstalledWorkspace(shutdownB),
+  ]);
   await releaseAllRunnerExecutions();
   assert.deepEqual(
     releaseRequests.slice(-2).sort(),
@@ -226,15 +260,43 @@ try {
   );
   assert.equal(timers.at(-2)?.cleared, true);
   assert.equal(timers.at(-1)?.cleared, true);
+  await Promise.all(
+    shutdownNodeModules.map((nodeModulesPath) =>
+      assert.rejects(fs.access(nodeModulesPath))
+    )
+  );
 
   console.log('Runner execution lease renewal test passed.');
 } finally {
+  process.chdir(originalCwd);
+  await fs.rm(testRoot, { recursive: true, force: true });
   globalThis.fetch = originalFetch;
   globalThis.setInterval = originalSetInterval;
   globalThis.clearInterval = originalClearInterval;
   Date.now = originalDateNow;
   delete process.env.OMNIBOARD_RUNNER_WORK_HEARTBEAT_TIMEOUT_MS;
   delete process.env.OMNIBOARD_RUNNER_EXECUTION_BUDGET_MS;
+}
+
+async function waitForMissing(targetPath: string) {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    try {
+      await fs.access(targetPath);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+      throw error;
+    }
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`Timed out waiting to remove "${targetPath}".`);
+}
+
+async function waitForProgressReport(runKey: string) {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (progressReports.at(-1)?.runKey === runKey) return;
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`Timed out waiting for watchdog progress for "${runKey}".`);
 }
 
 function expectProgressRequeue(runKey: string, watchdogReason: string) {
@@ -244,7 +306,7 @@ function expectProgressRequeue(runKey: string, watchdogReason: string) {
     status: 'pending_retry',
     error: 'Runner execution received no work heartbeat for 5 minutes.',
     notes:
-      'The MCP watchdog stopped renewing the lease and retained the workspace for a bounded retry.',
+      'The MCP watchdog stopped renewing the lease, removed workspace dependencies, and retained the checkout for a bounded retry.',
     metadata: {
       executionMode: 'dedicated-runner',
       watchdogReason,

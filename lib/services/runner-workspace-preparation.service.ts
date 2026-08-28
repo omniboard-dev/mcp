@@ -34,6 +34,7 @@ import {
   checkpointRunnerExecution,
   completeRunnerExecutionByIdentity,
   createRunnerWorkspaceState,
+  registerRunnerWorkspace,
   reinitializeRunnerExecution,
   releaseRunnerExecution,
   RunnerExecutionLeaseConflictError,
@@ -397,6 +398,7 @@ async function prepareRunnerWorkspaceInternal({
         )
       );
       localPath = await assertRunnerWorkspacePath(layout.workspaces, localPath);
+      await registerRunnerWorkspace(execution.executionKey, localPath);
       await assertGitWorkspaceIdentity(localPath);
       const targetBranch =
         changeRequest?.targetBranch ?? (await getDefaultBranch(localPath));
@@ -421,6 +423,7 @@ async function prepareRunnerWorkspaceInternal({
       state = createRunnerWorkspaceState(execution, localPath, access);
     } else {
       localPath = await assertRunnerWorkspacePath(layout.workspaces, localPath);
+      await registerRunnerWorkspace(execution.executionKey, localPath);
       state = createRunnerWorkspaceState(execution, localPath, access);
       assertWorkspaceIdentity(state, runKey, projectName, localPath);
       if (state.branch !== resolvedGitValues.branchName) {

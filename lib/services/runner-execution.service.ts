@@ -8,6 +8,7 @@ import {
   RunnerWorkspaceState,
 } from '../interface.js';
 import * as api from './api.service.js';
+import { removeRunnerWorkspaceNodeModules } from './runner-workspace-store.service.js';
 
 const LEASE_RENEWAL_INTERVAL_MS = readPositiveDuration(
   process.env.OMNIBOARD_RUNNER_LEASE_RENEWAL_INTERVAL_MS,
@@ -38,6 +39,7 @@ interface ActiveLease {
   lastWorkActivityAt: number;
   renewalInFlight: boolean;
   timer: NodeJS.Timeout;
+  localPath?: string;
 }
 
 const activeLeases = new Map<string, ActiveLease>();
@@ -76,7 +78,11 @@ export async function acquireRunnerExecution(
     })
     .catch((error: unknown) => {
       if (!isRunnerExecutionLeaseConflict(error)) throw error;
-      if (currentExecutionKey) forgetLease(currentExecutionKey);
+      if (currentLease) {
+        forgetLeaseAndCleanWorkspace(currentLease);
+      } else if (currentExecutionKey) {
+        forgetLease(currentExecutionKey);
+      }
       throw new RunnerExecutionLeaseConflictError(error.message);
     });
   registerLease(
@@ -124,6 +130,17 @@ export async function reinitializeRunnerExecution(
   return updated;
 }
 
+export async function registerRunnerWorkspace(
+  executionKey: string,
+  localPath: string
+): Promise<void> {
+  const lease = requireLease(executionKey);
+  if (lease.localPath && lease.localPath !== localPath) {
+    await removeRunnerWorkspaceNodeModules(lease.localPath);
+  }
+  lease.localPath = localPath;
+}
+
 export async function writeRunnerState(
   state: RunnerWorkspaceState,
   phase = inferWorkspacePhase(state)
@@ -150,15 +167,20 @@ export async function completeRunnerExecutionByIdentity(
   const executionKey = executionKeysByIdentity.get(
     executionIdentity(runKey, projectName)
   );
-  try {
-    return await api.completeRunnerExecutionByIdentity({
+  const lease = executionKey ? activeLeases.get(executionKey) : undefined;
+  const complete = () =>
+    api.completeRunnerExecutionByIdentity({
       runKey,
       projectName,
       phase,
     });
-  } finally {
-    if (executionKey) forgetLease(executionKey);
-  }
+  return lease
+    ? finishRunnerLease(
+        lease,
+        complete,
+        `Failed to complete runner execution ${runKey}/${projectName}.`
+      )
+    : complete();
 }
 
 export async function completeRunnerState(
@@ -166,23 +188,27 @@ export async function completeRunnerState(
   phase: 'completed' | 'abandoned' = 'completed'
 ): Promise<void> {
   const lease = requireLease(state.executionKey);
-  const execution = await api.completeRunnerExecution(state.executionKey, {
-    leaseToken: lease.token,
-    expectedStateVersion: state.stateVersion,
-    phase,
-  });
+  const execution = await finishRunnerLease(
+    lease,
+    () =>
+      api.completeRunnerExecution(state.executionKey, {
+        leaseToken: lease.token,
+        expectedStateVersion: state.stateVersion,
+        phase,
+      }),
+    `Failed to complete runner execution "${state.executionKey}".`
+  );
   applyExecutionToWorkspace(state, execution);
-  forgetLease(state.executionKey);
 }
 
 export async function releaseRunnerExecution(executionKey: string) {
   const lease = activeLeases.get(executionKey);
   if (!lease) return;
-  try {
-    await api.releaseRunnerExecution(executionKey, lease.token);
-  } finally {
-    forgetLease(executionKey);
-  }
+  await finishRunnerLease(
+    lease,
+    () => api.releaseRunnerExecution(executionKey, lease.token),
+    `Failed to release runner execution "${executionKey}".`
+  );
 }
 
 export interface ReleaseRunnerExecutionResult {
@@ -364,6 +390,7 @@ function registerLease(
     lastWorkActivityAt: now,
     renewalInFlight: false,
     timer,
+    localPath: existing?.localPath,
   });
   executionKeysByIdentity.set(identity, executionKey);
 }
@@ -398,7 +425,7 @@ async function renewLease(executionKey: string) {
   } catch (error) {
     if (activeLeases.get(executionKey) !== lease) return;
     if (isDefinitiveLeaseRejection(error) || Date.now() >= lease.expiresAt) {
-      forgetLease(executionKey);
+      forgetLeaseAndCleanWorkspace(lease);
     }
   } finally {
     if (activeLeases.get(executionKey) === lease) {
@@ -426,7 +453,7 @@ function getLeaseWatchdogTimeoutReason(lease: ActiveLease) {
 function getActiveLease(executionKey: string) {
   const lease = activeLeases.get(executionKey);
   if (lease && Date.now() >= lease.expiresAt) {
-    forgetLease(executionKey);
+    forgetLeaseAndCleanWorkspace(lease);
     return undefined;
   }
   return lease;
@@ -459,13 +486,23 @@ async function expireTimedOutLease(
   }
 
   try {
+    await cleanRunnerWorkspace(lease);
+  } catch (error) {
+    errors.push(
+      `workspace dependency cleanup: ${
+        error instanceof Error ? error.message : String(error)
+      }`
+    );
+  }
+
+  try {
     await api.upsertAgenticRunProgress({
       runKey: lease.runKey,
       projectName: lease.projectName,
       status: 'pending_retry',
       error: message,
       notes:
-        'The MCP watchdog stopped renewing the lease and retained the workspace for a bounded retry.',
+        'The MCP watchdog stopped renewing the lease, removed workspace dependencies, and retained the checkout for a bounded retry.',
       metadata: {
         executionMode: 'dedicated-runner',
         watchdogReason: reason,
@@ -488,6 +525,43 @@ async function expireTimedOutLease(
       }: ${errors.join('; ')}`
     );
   }
+}
+
+async function finishRunnerLease<T>(
+  lease: ActiveLease,
+  finish: () => Promise<T>,
+  errorMessage: string
+): Promise<T> {
+  const [finishResult, cleanupResult] = await Promise.allSettled([
+    finish(),
+    cleanRunnerWorkspace(lease),
+  ]);
+  forgetLease(lease.executionKey);
+
+  const errors = [finishResult, cleanupResult]
+    .filter(
+      (result): result is PromiseRejectedResult => result.status === 'rejected'
+    )
+    .map((result) => result.reason);
+  if (errors.length === 1) throw errors[0];
+  if (errors.length > 1) throw new AggregateError(errors, errorMessage);
+  return (finishResult as PromiseFulfilledResult<T>).value;
+}
+
+async function cleanRunnerWorkspace(lease: ActiveLease) {
+  if (!lease.localPath) return;
+  await removeRunnerWorkspaceNodeModules(lease.localPath);
+}
+
+function forgetLeaseAndCleanWorkspace(lease: ActiveLease) {
+  forgetLease(lease.executionKey);
+  void cleanRunnerWorkspace(lease).catch((error) => {
+    console.error(
+      `Runner workspace dependency cleanup failed for ${lease.runKey}/${
+        lease.projectName
+      }: ${error instanceof Error ? error.message : String(error)}`
+    );
+  });
 }
 
 function parseLeaseExpiry(value: string | null) {

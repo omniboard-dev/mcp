@@ -22,6 +22,7 @@ import {
   acquireRunnerExecution,
   completeRunnerExecutionByIdentity,
   createRunnerWorkspaceState,
+  registerRunnerWorkspace,
   releaseRunnerExecution,
   writeRunnerState,
 } from './runner-execution.service.js';
@@ -135,6 +136,7 @@ export async function finalizeRunnerWorkspace({
       layout.workspaces,
       expectedLocalPath
     );
+    await registerRunnerWorkspace(execution.executionKey, localPath);
     state = createRunnerWorkspaceState(execution, localPath, access);
     assertWorkspaceIdentity(state, runKey, projectName, localPath);
     assertFinalizationProjectStateMatchesWorkspace(state, projectState);
