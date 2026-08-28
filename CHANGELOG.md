@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.1.37](https://github.com/omniboard-dev/mcp/compare/v0.1.36...v0.1.37) (2026-08-28)
+
+
+### Bug Fixes
+
+* **runner:** clean workspace dependencies on stop ([7bd1bbc](https://github.com/omniboard-dev/mcp/commit/7bd1bbc399a35db8eddac2844363b97ff891d00e))
+
 ### [0.1.36](https://github.com/omniboard-dev/mcp/compare/v0.1.35...v0.1.36) (2026-08-25)
 
 
