@@ -106,7 +106,8 @@ export async function runAgenticRunIntegration(context: any) {
     resolution = null,
     providerSyncSuccess = true,
     targetedByRun = true,
-    hasProgress = true
+    hasProgress = true,
+    metadata = undefined
   ) =>
     getAgenticRunContinuationDecision({
       run: {
@@ -127,6 +128,7 @@ export async function runAgenticRunIntegration(context: any) {
         hasProgress,
         mergeRequestDetailedStatus,
         resolution,
+        metadata,
       },
       providerSync: {
         attempted: false,
@@ -176,6 +178,41 @@ export async function runAgenticRunIntegration(context: any) {
       'waiting_for_provider_activity'
     );
   }
+  assert.equal(
+    continuationDecision('blocked', null, null, true, true, true).action,
+    'wait'
+  );
+  assert.equal(
+    getAgenticRunContinuationDecision({
+      run: {
+        runKey: 'run-icons',
+        checkName: 'icon-registry',
+        status: 'active',
+        isActive: true,
+      },
+      project: {
+        id: 1,
+        name: 'project-a',
+        currentlyMatchesCheck: true,
+        fulfillment: 'fulfilled',
+        targetedByRun: true,
+      },
+      progress: {
+        status: 'blocked',
+        mergeRequestUrl: null,
+        metadata: {
+          remediation: 'target_sync',
+          remediationPhase: 'conflicts',
+        },
+      },
+      providerSync: {
+        attempted: false,
+        success: true,
+        diagnostics: [],
+      },
+    }).reason,
+    'active_work'
+  );
   assert.deepEqual(
     [
       continuationDecision('done', null, 'merged'),

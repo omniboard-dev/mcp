@@ -22,7 +22,8 @@ import {
   applyGitIdentity,
   checkoutRemoteBranch,
   cloneRepository,
-  createBranch,
+  createBranchAt,
+  fetchBranch,
   getDefaultBranch,
   getEffectiveRepositoryUrl,
   getHeadCommit,
@@ -47,7 +48,7 @@ import {
   createRecoveryProgressMetadata,
   createRecoveryWorkspaceInstructions,
   formatRecoveryProgressNote,
-  prepareRunnerRebaseRecovery,
+  prepareRunnerTargetSynchronization,
   reconcileRunnerRecoveryWorkspace,
 } from './runner-workspace-recovery.service.js';
 import {
@@ -66,7 +67,6 @@ import {
 } from './runner-workspace-store.service.js';
 import {
   getChangeRequestDetails,
-  requestChangeRequestRebase,
   SourceControlChangeRequestDetails,
   validateRepositoryAccess,
 } from './source-control.service.js';
@@ -299,40 +299,14 @@ async function prepareRunnerWorkspaceInternal({
       );
     }
 
-    let providerRebaseFailure: string | undefined;
-    if (
-      changeRequest &&
-      continuation.reason === 'actionable_merge_block' &&
-      normalizeProviderStatus(
-        projectState.progress.mergeRequestDetailedStatus
-      ) === 'need_rebase'
-    ) {
-      if (changeRequest.rebaseInProgress) {
-        return createAutomaticRebasePreparation(
-          runResponse,
-          project,
-          projectState,
-          changeRequest,
-          'Provider-native rebase is already in progress.'
-        );
-      }
-      const rebaseRequest = changeRequest.rebaseError
-        ? { requested: false as const, reason: changeRequest.rebaseError }
-        : await requestChangeRequestRebase(
-            access,
-            repository.repositoryId,
-            changeRequest.url
-          );
-      if (rebaseRequest.requested) {
-        return createAutomaticRebasePreparation(
-          runResponse,
-          project,
-          projectState,
-          changeRequest,
-          'Provider-native rebase was requested successfully.'
-        );
-      }
-      providerRebaseFailure = rebaseRequest.reason;
+    if (changeRequest?.rebaseInProgress) {
+      return createAutomaticRebasePreparation(
+        runResponse,
+        project,
+        projectState,
+        changeRequest,
+        'Provider-native rebase is already in progress.'
+      );
     }
 
     const gitIdentity = await getMcpStartupGitIdentity();
@@ -400,17 +374,33 @@ async function prepareRunnerWorkspaceInternal({
       localPath = await assertRunnerWorkspacePath(layout.workspaces, localPath);
       await registerRunnerWorkspace(execution.executionKey, localPath);
       await assertGitWorkspaceIdentity(localPath);
+      await applyGitIdentity(gitIdentity, localPath);
       const targetBranch =
         changeRequest?.targetBranch ?? (await getDefaultBranch(localPath));
+      await withGitCredentials(access, localPath, (env) =>
+        fetchBranch(effectiveRepositoryUrl, targetBranch, localPath!, env)
+      );
       const remoteBranchCommit = await getRemoteBranchCommit(
         resolvedGitValues.branchName,
         localPath
       );
       if (remoteBranchCommit) {
+        await withGitCredentials(access, localPath, (env) =>
+          fetchBranch(
+            effectiveRepositoryUrl,
+            resolvedGitValues.branchName,
+            localPath!,
+            env
+          )
+        );
         await checkoutRemoteBranch(resolvedGitValues.branchName, localPath);
         resumed = true;
       } else {
-        await createBranch(resolvedGitValues.branchName, localPath);
+        await createBranchAt(
+          resolvedGitValues.branchName,
+          `refs/remotes/origin/${targetBranch}`,
+          localPath
+        );
       }
       const preparedHeadSha = (await getHeadCommit(localPath)).sha;
       execution = await checkpointRunnerExecution(execution, {
@@ -421,6 +411,13 @@ async function prepareRunnerWorkspaceInternal({
         recovery: null,
       });
       state = createRunnerWorkspaceState(execution, localPath, access);
+      await prepareRunnerTargetSynchronization(
+        state,
+        localPath,
+        effectiveRepositoryUrl,
+        access,
+        changeRequest?.url
+      );
     } else {
       localPath = await assertRunnerWorkspacePath(layout.workspaces, localPath);
       await registerRunnerWorkspace(execution.executionKey, localPath);
@@ -444,6 +441,8 @@ async function prepareRunnerWorkspaceInternal({
           'Retained runner workspace repository identity no longer matches the project.'
         );
       }
+      await assertGitWorkspaceIdentity(localPath);
+      await applyGitIdentity(gitIdentity, localPath);
       state.targetBranch = changeRequest?.targetBranch ?? state.targetBranch;
       try {
         if (state.recovery) {
@@ -469,21 +468,14 @@ async function prepareRunnerWorkspaceInternal({
           branch,
         });
       }
-      resumed = true;
-    }
-
-    await applyGitIdentity(gitIdentity, localPath);
-
-    if (changeRequest && continuation.reason === 'actionable_merge_block') {
-      await prepareRunnerRebaseRecovery(
+      await prepareRunnerTargetSynchronization(
         state,
         localPath,
         effectiveRepositoryUrl,
         access,
-        changeRequest,
-        projectState.progress.mergeRequestDetailedStatus,
-        providerRebaseFailure
+        changeRequest?.url
       );
+      resumed = true;
     }
 
     const progressReport = await reportRunnerAgenticRunProgressSafely(
@@ -821,10 +813,6 @@ function createWorkspaceInstructions(
       projectName +
       '" so this workspace does not remain leased.',
   ];
-}
-
-function normalizeProviderStatus(value?: string | null) {
-  return value?.trim().toLowerCase() ?? '';
 }
 
 function toErrorMessage(error: unknown) {

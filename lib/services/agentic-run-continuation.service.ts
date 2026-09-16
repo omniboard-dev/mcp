@@ -150,6 +150,17 @@ export function getAgenticRunContinuationDecision(
         diagnostics
       );
     case 'blocked':
+      if (isTargetSynchronizationRecovery(projectState.progress.metadata)) {
+        return decision(
+          'continue',
+          'active_work',
+          [
+            'Continue the checkpointed target-branch synchronization recovery in the retained runner workspace.',
+            currentResultGuidance(projectState),
+          ],
+          diagnostics
+        );
+      }
       if (
         ACTIONABLE_MERGE_STATUSES.has(
           normalizeProviderStatus(
@@ -167,6 +178,7 @@ export function getAgenticRunContinuationDecision(
           diagnostics
         );
       }
+
       return decision(
         'wait',
         'waiting_for_provider_activity',
@@ -206,6 +218,17 @@ export function getAgenticRunContinuationDecision(
         diagnostics
       );
   }
+}
+
+function isTargetSynchronizationRecovery(
+  metadata?: Record<string, unknown> | null
+) {
+  return (
+    metadata?.remediation === 'target_sync' &&
+    (metadata.remediationPhase === 'in_progress' ||
+      metadata.remediationPhase === 'conflicts' ||
+      metadata.remediationPhase === 'ready_to_push')
+  );
 }
 
 function currentResultGuidance(projectState: AgenticRunProjectState) {

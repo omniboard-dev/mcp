@@ -13,15 +13,20 @@ import {
 } from './agentic-runs.service.js';
 import {
   applyGitIdentity,
+  fetchBranch,
   getEffectiveRepositoryUrl,
+  getHeadCommit,
   getMcpStartupGitIdentity,
+  getRemoteBranchCommit,
   getWorkingTreeStatus,
   pushBranch,
+  pushBranchWithLease,
 } from './git.service.js';
 import {
   acquireRunnerExecution,
   completeRunnerExecutionByIdentity,
   createRunnerWorkspaceState,
+  getActiveRunnerExecution,
   registerRunnerWorkspace,
   releaseRunnerExecution,
   writeRunnerState,
@@ -31,7 +36,10 @@ import {
   createRunnerCommit,
   resolveExistingRunnerCommit,
 } from './runner-workspace-git.service.js';
-import { finalizeRunnerRebaseRecovery } from './runner-workspace-recovery.service.js';
+import {
+  finalizeRunnerRebaseRecovery,
+  prepareRunnerTargetSynchronization,
+} from './runner-workspace-recovery.service.js';
 import {
   assertAuthorizedRepositoryUrl,
   repositoryIdentity,
@@ -47,6 +55,7 @@ import {
 } from './runner-workspace-store.service.js';
 import {
   createChangeRequest,
+  getChangeRequestDetails,
   providerLabel,
   validateRepositoryAccess,
 } from './source-control.service.js';
@@ -77,8 +86,17 @@ export async function finalizeRunnerWorkspace({
     runKey,
     projectName
   );
+  const activeExecution = getActiveRunnerExecution(runKey, projectName);
+  const canFinalizeLocalTargetSyncRecovery =
+    activeExecution?.recovery?.kind === 'target_sync';
   const continuation = await resolveAgenticRunContinuation(projectState);
-  if (continuation.action !== 'continue') {
+  if (
+    continuation.action !== 'continue' &&
+    !(
+      canFinalizeLocalTargetSyncRecovery &&
+      continuation.reason === 'waiting_for_provider_activity'
+    )
+  ) {
     if (continuation.action === 'stop') {
       await completeRunnerExecutionByIdentity(
         runKey,
@@ -108,15 +126,17 @@ export async function finalizeRunnerWorkspace({
     branch: projectState.progress.branch ?? undefined,
   });
   const gitIdentity = await getMcpStartupGitIdentity();
-  const execution = await acquireRunnerExecution({
-    runKey,
-    projectName,
-    repositoryUrl,
-    sourceControlProvider: access.provider,
-    sourceControlRepositoryId: repository.repositoryId,
-    branch: resolvedGitValues.branchName,
-    commitMessage: resolvedGitValues.commitMessage,
-  });
+  const execution =
+    activeExecution ??
+    (await acquireRunnerExecution({
+      runKey,
+      projectName,
+      repositoryUrl,
+      sourceControlProvider: access.provider,
+      sourceControlRepositoryId: repository.repositoryId,
+      branch: resolvedGitValues.branchName,
+      commitMessage: resolvedGitValues.commitMessage,
+    }));
   let localPath: string;
   let state: RunnerWorkspaceState;
   try {
@@ -153,66 +173,203 @@ export async function finalizeRunnerWorkspace({
   const progressReports: AgenticRunProgressReportResult[] = [];
 
   try {
-    if (state.recovery) {
-      return finalizeRunnerRebaseRecovery(state, localPath, progressReports);
+    await assertGitWorkspaceIdentity(localPath);
+    await applyGitIdentity(gitIdentity, localPath);
+    if (
+      !state.recovery &&
+      state.phase === 'prepared' &&
+      (await getHeadCommit(localPath)).sha !== state.preparedHeadSha
+    ) {
+      await resolveExistingRunnerCommit(
+        state,
+        localPath,
+        resolvedCommitMessage
+      );
     }
+    if (!state.recovery && state.phase === 'prepared') {
+      await prepareRunnerTargetSynchronization(
+        state,
+        localPath,
+        effectiveRepositoryUrl,
+        access,
+        projectState.progress.mergeRequestUrl,
+        true
+      );
+    }
+    if (state.recovery) {
+      const recoveryResult = await finalizeRunnerRebaseRecovery(
+        state,
+        localPath,
+        progressReports
+      );
+      if (
+        recoveryResult.completed ||
+        recoveryResult.error ||
+        (state.recovery &&
+          (state.recovery.kind !== 'target_sync' ||
+            state.recovery.phase !== 'ready_to_push'))
+      ) {
+        return recoveryResult;
+      }
+    }
+    const targetSyncExpectedSourceHead =
+      state.recovery?.kind === 'target_sync'
+        ? state.recovery.sourceHeadSha
+        : undefined;
+    const targetSyncMergeRequestUrl =
+      state.recovery?.kind === 'target_sync'
+        ? state.recovery.mergeRequestUrl
+        : projectState.progress.mergeRequestUrl;
 
     await assertGitWorkspaceIdentity(localPath);
     await applyGitIdentity(gitIdentity, localPath);
     await assertCurrentRunnerBranch(state, localPath);
-    const status = await getWorkingTreeStatus(localPath);
-    const commitSha = status
-      ? await createRunnerCommit(state, localPath, resolvedCommitMessage)
-      : await resolveExistingRunnerCommit(
+    let commitSha: string;
+    if (state.phase === 'pushed') {
+      const head = await getHeadCommit(localPath);
+      if (
+        head.sha !== state.commitSha ||
+        (await getWorkingTreeStatus(localPath))
+      ) {
+        throw new Error(
+          'The published runner workspace changed; prepare it again before finalizing new work.'
+        );
+      }
+      commitSha = head.sha;
+    } else {
+      if (targetSyncExpectedSourceHead) {
+        await withGitCredentials(access, localPath, async (env) => {
+          await fetchBranch(
+            effectiveRepositoryUrl,
+            state.branch,
+            localPath,
+            env
+          );
+        });
+        const remoteSourceHead = await getRemoteBranchCommit(
+          state.branch,
+          localPath
+        );
+        if (remoteSourceHead !== targetSyncExpectedSourceHead) {
+          throw new Error(
+            'The provider source branch advanced after target synchronization; no commit or push was attempted.'
+          );
+        }
+      }
+      const status = await getWorkingTreeStatus(localPath);
+      if (status) {
+        commitSha = await createRunnerCommit(
           state,
           localPath,
           resolvedCommitMessage
         );
-    progressReports.push(
-      await reportRunnerAgenticRunProgressSafely(runKey, projectName, {
-        status: 'committed',
-        repositoryUrl: state.repositoryUrl,
-        branch: state.branch,
-        commitSha,
-        notes: resolvedCommitMessage,
-      })
-    );
+      } else if (targetSyncExpectedSourceHead) {
+        const head = await getHeadCommit(localPath);
+        if (
+          head.sha !== state.preparedHeadSha &&
+          head.sha !== state.commitSha
+        ) {
+          throw new Error(
+            'Runner workspace HEAD changed after target synchronization; commit manually or prepare a new workspace.'
+          );
+        }
+        commitSha = head.sha;
+        state.commitSha = commitSha;
+        await writeRunnerState(state);
+      } else {
+        commitSha = await resolveExistingRunnerCommit(
+          state,
+          localPath,
+          resolvedCommitMessage
+        );
+      }
+      progressReports.push(
+        await reportRunnerAgenticRunProgressSafely(runKey, projectName, {
+          status: 'committed',
+          repositoryUrl: state.repositoryUrl,
+          branch: state.branch,
+          commitSha,
+          notes: resolvedCommitMessage,
+        })
+      );
 
-    const workspaceRepositoryUrl = await getEffectiveRepositoryUrl(
-      state.repositoryUrl,
-      localPath
-    );
-    assertAuthorizedRepositoryUrl(
-      access,
-      state.repositoryUrl,
-      workspaceRepositoryUrl
-    );
-    const workspaceRepository = await validateRepositoryAccess(
-      access,
-      workspaceRepositoryUrl
-    );
-    if (workspaceRepository.repositoryId !== state.projectPath) {
-      throw new Error(
-        `${providerLabel(access)} ${
-          access.provider === 'gitlab' ? 'project' : 'repository'
-        } identity changed from "${state.projectPath}" to "${
-          workspaceRepository.repositoryId
-        }".`
+      const workspaceRepositoryUrl = await getEffectiveRepositoryUrl(
+        state.repositoryUrl,
+        localPath
+      );
+      assertAuthorizedRepositoryUrl(
+        access,
+        state.repositoryUrl,
+        workspaceRepositoryUrl
+      );
+      const workspaceRepository = await validateRepositoryAccess(
+        access,
+        workspaceRepositoryUrl
+      );
+      if (workspaceRepository.repositoryId !== state.projectPath) {
+        throw new Error(
+          `${providerLabel(access)} ${
+            access.provider === 'gitlab' ? 'project' : 'repository'
+          } identity changed from "${state.projectPath}" to "${
+            workspaceRepository.repositoryId
+          }".`
+        );
+      }
+      await withGitCredentials(access, localPath, (env) =>
+        targetSyncExpectedSourceHead
+          ? pushBranchWithLease(
+              workspaceRepositoryUrl,
+              state.branch,
+              targetSyncExpectedSourceHead,
+              localPath,
+              env
+            )
+          : pushBranch(workspaceRepositoryUrl, state.branch, localPath, env)
+      );
+      state.recovery = undefined;
+      await writeRunnerState(state, 'pushed');
+      progressReports.push(
+        await reportRunnerAgenticRunProgressSafely(runKey, projectName, {
+          status: 'pushed',
+          repositoryUrl: state.repositoryUrl,
+          branch: state.branch,
+          commitSha,
+          notes: `Pushed branch "${state.branch}".`,
+        })
       );
     }
-    await withGitCredentials(access, localPath, (env) =>
-      pushBranch(workspaceRepositoryUrl, state.branch, localPath, env)
-    );
-    await writeRunnerState(state, 'pushed');
-    progressReports.push(
-      await reportRunnerAgenticRunProgressSafely(runKey, projectName, {
-        status: 'pushed',
-        repositoryUrl: state.repositoryUrl,
-        branch: state.branch,
+
+    if (targetSyncMergeRequestUrl) {
+      const mergeRequest = await getChangeRequestDetails(
+        access,
+        state.projectPath,
+        targetSyncMergeRequestUrl
+      );
+      progressReports.push(
+        await reportRunnerAgenticRunProgressSafely(runKey, projectName, {
+          status: 'pushed',
+          repositoryUrl: state.repositoryUrl,
+          branch: state.branch,
+          commitSha,
+          mergeRequestUrl: mergeRequest.url,
+          mergeRequestState: mergeRequest.state,
+          notes: `Updated existing merge request: ${mergeRequest.title}`,
+          metadata: {
+            mcpTool: 'omniboard_runner_finalize_agentic_run_workspace',
+            mergeRequestIid: mergeRequest.iid ?? null,
+            targetBranch: state.targetBranch,
+          },
+        })
+      );
+      await releaseRunnerExecution(state.executionKey);
+      return {
+        completed: true,
+        workspace: state,
         commitSha,
-        notes: `Pushed branch "${state.branch}".`,
-      })
-    );
+        mergeRequest,
+        progressReports,
+      };
+    }
 
     const mergeRequest = await createChangeRequest(
       access,

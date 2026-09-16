@@ -1,3 +1,4 @@
+import fs from 'node:fs/promises';
 import path from 'node:path';
 
 import { runFile } from './shell.service.js';
@@ -175,6 +176,18 @@ export async function createBranch(branch: string, targetDir: string) {
   );
 }
 
+export async function createBranchAt(
+  branch: string,
+  ref: string,
+  targetDir: string
+) {
+  validateBranch(branch);
+  await runGit(
+    ['-c', 'core.hooksPath=/dev/null', 'checkout', '-b', branch, ref],
+    targetDir
+  );
+}
+
 export async function fetchBranch(
   repositoryUrl: string,
   branch: string,
@@ -197,6 +210,33 @@ export async function fetchBranch(
     targetDir,
     env
   );
+}
+
+export async function fetchBranchIfExists(
+  repositoryUrl: string,
+  branch: string,
+  targetDir: string,
+  env: NodeJS.ProcessEnv
+) {
+  validateBranch(branch);
+  const { stdout } = await runGit(
+    [
+      '-c',
+      'credential.helper=',
+      '-c',
+      'core.hooksPath=/dev/null',
+      'ls-remote',
+      '--heads',
+      '--',
+      repositoryUrl,
+      `refs/heads/${branch}`,
+    ],
+    targetDir,
+    env
+  );
+  if (!stdout.trim()) return null;
+  await fetchBranch(repositoryUrl, branch, targetDir, env);
+  return getRemoteBranchCommit(branch, targetDir);
 }
 
 export async function getRefCommit(
@@ -321,7 +361,30 @@ export async function skipRebase(targetDir: string) {
 }
 
 export async function isRebaseInProgress(targetDir: string) {
-  return Boolean(await getRefCommit('REBASE_HEAD', targetDir));
+  const rebasePaths = await Promise.all(
+    ['rebase-merge', 'rebase-apply'].map(async (name) => {
+      const { stdout } = await runGit(
+        ['rev-parse', '--git-path', name],
+        targetDir
+      );
+      return path.resolve(targetDir, stdout.trim());
+    })
+  );
+  for (const rebasePath of rebasePaths) {
+    try {
+      await fs.access(rebasePath);
+      return true;
+    } catch (error) {
+      if (
+        !(error instanceof Error) ||
+        !('code' in error) ||
+        error.code !== 'ENOENT'
+      ) {
+        throw error;
+      }
+    }
+  }
+  return false;
 }
 
 export async function getConflictedFiles(targetDir: string) {
@@ -340,7 +403,107 @@ export async function getWorkingTreeStatus(targetDir: string) {
     ['-c', 'core.fsmonitor=false', 'status', '--porcelain'],
     targetDir
   );
-  return stdout.trim();
+  return stdout.trimEnd();
+}
+
+export async function stashWorkingTree(targetDir: string) {
+  await runGit(
+    [
+      '-c',
+      'core.fsmonitor=false',
+      'stash',
+      'push',
+      '--include-untracked',
+      '--message',
+      'omniboard-runner-target-sync',
+    ],
+    targetDir
+  );
+  const stashCommit = await getRefCommit('stash@{0}', targetDir);
+  if (!stashCommit) {
+    throw new Error(
+      'Git created a working-tree stash but its exact commit could not be resolved.'
+    );
+  }
+  return stashCommit;
+}
+
+// A successful Git restore and the API checkpoint are separate writes. Retain a
+// local receipt until the exact stash is dropped so checkpoint retries are safe.
+export async function applyStash(stashRef: string, targetDir: string) {
+  const sha = await getRefCommit(stashRef, targetDir);
+  if (!sha) throw new Error('The preserved stash cannot be resolved.');
+  const receipt = 'refs/omniboard/applied-stashes/' + sha;
+  if (await getRefCommit(receipt, targetDir)) return;
+  try {
+    await applyStashOnce(sha, targetDir);
+  } catch (error) {
+    if ((await getConflictedFiles(targetDir)).length) {
+      await runGit(['update-ref', receipt, sha], targetDir);
+    }
+    throw error;
+  }
+  await runGit(['update-ref', receipt, sha], targetDir);
+}
+
+async function applyStashOnce(stashRef: string, targetDir: string) {
+  try {
+    await runGit(
+      ['-c', 'core.fsmonitor=false', 'stash', 'apply', '--index', stashRef],
+      targetDir,
+      { LC_ALL: 'C' }
+    );
+  } catch (error) {
+    if (
+      !error ||
+      typeof error !== 'object' ||
+      !('stderr' in error) ||
+      !String(error.stderr).includes('conflicts in index. Try without --index.')
+    ) {
+      throw error;
+    }
+    // Git could not restore the saved index and has not applied the stash.
+    // Use its three-way merge to expose ordinary, resolvable file conflicts.
+    await runGit(
+      ['-c', 'core.fsmonitor=false', 'stash', 'apply', stashRef],
+      targetDir
+    );
+  }
+}
+
+export async function getStashEntry(
+  stashRef: string,
+  targetDir: string
+): Promise<{ commitSha: string; ref: string; message: string } | null> {
+  const { stdout } = await runGit(
+    ['stash', 'list', '--format=%H%x00%gd%x00%gs'],
+    targetDir
+  );
+  for (const line of stdout.split('\n').filter(Boolean)) {
+    const [commitSha, ref, message] = line.split('\0');
+    if (commitSha === stashRef || ref === stashRef) {
+      return { commitSha, ref, message };
+    }
+  }
+  return null;
+}
+
+export async function dropStash(stashCommitSha: string, targetDir: string) {
+  const stashEntry = await getStashEntry(stashCommitSha, targetDir);
+  if (!stashEntry) {
+    throw new Error(
+      `The preserved working-tree stash "${stashCommitSha}" is no longer available.`
+    );
+  }
+  await runGit(['stash', 'drop', stashEntry.ref], targetDir);
+  await runGit(
+    [
+      'update-ref',
+      '-d',
+      'refs/omniboard/applied-stashes/' + stashEntry.commitSha,
+    ],
+    targetDir
+  );
 }
 
 export async function commitAll(message: string, targetDir: string) {

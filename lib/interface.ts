@@ -339,6 +339,7 @@ export interface AgenticRunProjectProgress {
   pipelineUrl?: string | null;
   pipelineFailureSummary?: string | null;
   pipelineFailureDiagnostics?: PipelineFailureDiagnostics | null;
+  metadata?: Record<string, unknown> | null;
   providerSyncError?: string | null;
   retryInstructions?: AgenticRunRetryInstruction[];
   [key: string]: unknown;
@@ -571,15 +572,17 @@ export interface RunnerWorkspaceState {
 }
 
 export interface RunnerWorkspaceRebaseRecovery {
-  kind: 'rebase';
-  phase: 'conflicts' | 'ready_to_push';
-  mergeRequestUrl: string;
+  kind: 'rebase' | 'target_sync';
+  phase: 'in_progress' | 'conflicts' | 'ready_to_push';
+  mergeRequestUrl?: string | null;
   sourceBranch: string;
   targetBranch: string;
-  sourceHeadSha: string;
+  sourceHeadSha?: string;
   targetHeadSha: string;
   attempt: number;
   conflictFiles: string[];
+  stashRef?: string;
+  stashApplied?: boolean;
 }
 
 export interface RunnerWorkspacePrepareResult {

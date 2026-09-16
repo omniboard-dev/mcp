@@ -433,9 +433,13 @@ Preparation follows this sequence:
 4. When work can continue, verify repository access and acquire the DB execution
    lease.
 5. Reuse a validated checkout or recreate a missing or inconsistent checkout at
-   a new generation.
-6. Report `in_progress`, or `blocked` when recovery has unresolved conflicts.
-7. Return the prompt, result context, provider diagnostics, workspace path, and
+   a new generation, then fetch the latest source and configured target branches.
+6. Rebase the prepared source branch onto the fetched target before returning
+   actionable work. Tracked, staged, unstaged, and untracked changes in a
+   retained checkout are preserved through this synchronization.
+7. Report `in_progress`, or `blocked` when target synchronization or recovery has
+   unresolved conflicts.
+8. Return the prompt, result context, provider diagnostics, workspace path, and
    agent instructions.
 
 Continuation outcomes include:
@@ -465,34 +469,61 @@ Both resolved values are stored in the DB execution checkpoint.
 An optional repository URL is accepted only when it identifies a registered
 repository URL for the matched Omniboard project.
 
-When a previously green change request becomes stale, recovery proceeds as
-follows:
+Every preparation fetches the latest configured target branch (normally `main`)
+before returning a workspace. If the source branch must be rebased, MCP CLI
+checkpoints the synchronization state and prepared HEAD before continuing.
+Rebased existing source branches are later published with
+`force-with-lease` against the source SHA observed during preparation. If the
+target application or restoration of retained dirty work conflicts, preparation
+returns `blocked` with the workspace and checkpointed recovery state; it never
+resets or silently discards those changes.
 
-1. Preparation uses the provider-refreshed detailed merge status as the recovery
-   trigger.
-2. For `need_rebase`, MCP CLI requests a provider-native rebase and returns `wait`.
-   The coordinator prepares the project again after the provider finishes.
-3. If native rebase is unavailable or conflicts exist, MCP CLI fetches the
-   authoritative source and target branches and starts a local rebase.
-4. MCP CLI reports `blocked` and returns the exact conflict files and resolution
-   instructions.
-5. The coding agent resolves and stages only those files, then calls
-   finalization. It must not commit, rebase, or push manually.
-6. If another conflict set appears, finalization returns `completed: false` and
-   the caller repeats the resolution and finalization steps.
-7. Once clean, MCP CLI refetches both branches and retries against a newly advanced
-   target up to a bounded limit.
-8. MCP CLI pushes the rebased source with `force-with-lease` bound to the source SHA
-   where recovery started.
+Synchronization checkpoints the source SHA, target SHA, and preserved stash
+before changing the branch. A failed checkpoint leaves the existing work
+recoverable in the same checkout. Synchronization metadata is retained until
+the push is confirmed, so a failed push can be retried without losing its lease.
+Repeated preparation and synchronization finalization refresh the target again;
+an active conflict must be resolved before rebasing onto any newer target.
+If restoring staged edits conflicts with upstream changes, the runner returns
+ordinary file conflicts for the agent to resolve and stage before finalization.
+Changes to the merge request's branches or concurrent changes to its source
+branch stop publication while preserving the checkout and migration edits.
+
+New migrations and stale or blocked workspaces use the same local synchronization
+flow whenever the continuation decision allows work:
+
+1. Refresh project/provider state, acquire the execution lease, and create or
+   resume the dedicated source-branch checkout.
+2. Fetch the configured target (normally `main`), preserve local edits, and rebase
+   if needed. An already-current branch needs no Git history change. MCP CLI does
+   not request provider-native rebases; it waits if one is already in progress.
+3. Return the run prompt and workspace. The coding agent completes the migration,
+   resolves and stages any reported conflicts, and runs relevant checks.
+4. Finalization continues any pending rebase and refreshes the target again. New
+   conflicts return `completed: false` and the same checkout for another resolution
+   pass. A moving target never triggers a destructive retry-limit reset.
+5. Commit the migration and push. Rewritten existing branches use
+   `force-with-lease` against the recorded source SHA. Create or reuse the change
+   request; retries after a checkpointed push resume provider publication.
+6. Continue refreshing provider state: fix actionable code, review, or mergeability
+   failures; wait for pending CI/review; stop successfully when the merge is
+   observed. Successful workspace finalization means publication completed, not
+   that the migration has merged.
 
 Recovery safeguards are:
 
-- If the source branch advances concurrently, MCP CLI does not push. It resets the
-  retained workspace to that remote source and requires another preparation.
+- Concurrent source changes or changed request branches stop publication while
+  preserving the checkout and migration edits for reconciliation.
 - Recovery phase, attempt, source and target SHAs, and conflict files are
-  checkpointed after every recoverable transition.
+  checkpointed after every recoverable transition. Stored legacy rebase
+  checkpoints resume through this same flow.
+- A local Git receipt records restored stashes until they are dropped, preventing
+  a failed API checkpoint from causing duplicate restoration on retry.
+- Local conflict recovery stays actionable even when an existing remote change
+  request is still mergeable.
 - Another MCP CLI process can continue from the checkpoint after the previous lease
   expires.
+
 
 #### `omniboard_runner_release_agentic_run_workspace`
 
@@ -522,11 +553,12 @@ Before normal finalization or recovery, MCP CLI:
 
 After the coding agent applies and verifies a normal change, MCP CLI:
 
-1. Creates or resumes the runner commit.
-2. Retrieves fresh repository access and pushes the prepared branch.
-3. Creates or reuses the GitLab merge request.
-4. Reports `committed`, `pushed`, and `mr_created` milestones.
-5. Releases the execution lease and removes the workspace root `node_modules`.
+1. Synchronizes unpublished work with the latest target and continues any pending rebase.
+2. Creates or resumes the runner commit.
+3. Retrieves fresh repository access and pushes the prepared branch.
+4. Creates or reuses the provider change request.
+5. Reports `committed`, `pushed`, and applicable change-request milestones.
+6. Releases the execution lease and removes the workspace root `node_modules`.
 
 Failed finalization also releases the lease and removes `node_modules` after
 reporting the failure. Graceful MCP shutdown and watchdog expiry perform the
@@ -544,11 +576,11 @@ A successful recovery also:
 - Reports `pushed`.
 - Clears the DB recovery checkpoint.
 - Releases the execution lease.
-- Requests an immediate Omniboard provider-state refresh.
+- Leaves further provider-state refreshes to the continuation loop.
 
 The prepared commit message is used by default. The caller may override it and
-may also supply the merge request title and description. Commit identity comes
-from the checkout-local or global Git configuration described above.
+may also supply the merge request title and description. Commit and rebase committer identity use the MCP startup project identity,
+applied to the checkout before Git can create commits.
 
 A successful push is not terminal because review, pipeline, or rebase recovery
 may still continue. Execution lifecycle outcomes are:

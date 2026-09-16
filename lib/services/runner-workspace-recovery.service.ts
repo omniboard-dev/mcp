@@ -1,5 +1,4 @@
 import {
-  AgenticRunProgressReportResult,
   RepositoryAccess,
   RunnerWorkspaceFinalizeResult,
   RunnerWorkspaceRebaseRecovery,
@@ -8,18 +7,23 @@ import {
 import * as api from './api.service.js';
 import { reportRunnerAgenticRunProgressSafely } from './agentic-runs.service.js';
 import {
+  applyStash,
   continueRebase,
+  dropStash,
   fetchBranch,
+  fetchBranchIfExists,
   getConflictedFiles,
   getEffectiveRepositoryUrl,
   getHeadCommit,
   getRemoteBranchCommit,
+  getStashEntry,
   getWorkingTreeStatus,
+  isAncestor,
   isRebaseInProgress,
-  pushBranchWithLease,
-  resetBranchToRemote,
   skipRebase,
+  stashWorkingTree,
   startRebase,
+  fastForwardBranch,
 } from './git.service.js';
 import {
   assertCurrentRunnerBranch,
@@ -29,15 +33,10 @@ import {
   assertAuthorizedRepositoryUrl,
   withGitCredentials,
 } from './runner-workspace-repository.service.js';
-import {
-  releaseRunnerExecution,
-  writeRunnerState,
-} from './runner-execution.service.js';
+import { writeRunnerState } from './runner-execution.service.js';
 import { assertGitWorkspaceIdentity } from './runner-workspace-store.service.js';
 import {
   getChangeRequestDetails,
-  providerLabel,
-  SourceControlChangeRequestDetails,
   validateRepositoryAccess,
 } from './source-control.service.js';
 
@@ -53,15 +52,47 @@ export async function finalizeRunnerRebaseRecovery(
   if (!recovery) {
     throw new Error('Runner workspace rebase recovery state is missing.');
   }
+  // Stored legacy rebase checkpoints resume through the same synchronization flow.
+  recovery.kind = 'target_sync';
+  return finalizeRunnerTargetSynchronization(state, localPath, progressReports);
+}
 
-  if (recovery.phase === 'conflicts') {
-    if (await isRebaseInProgress(localPath)) {
-      try {
-        await continueRebase(localPath);
-      } catch (error) {
-        const conflictFiles = await getConflictedFiles(localPath);
-        if (conflictFiles.length) {
-          recovery.conflictFiles = conflictFiles;
+async function finalizeRunnerTargetSynchronization(
+  state: RunnerWorkspaceState,
+  localPath: string,
+  progressReports: Awaited<
+    ReturnType<typeof reportRunnerAgenticRunProgressSafely>
+  >[]
+): Promise<RunnerWorkspaceFinalizeResult> {
+  const recovery = state.recovery;
+  if (!recovery) {
+    throw new Error(
+      'Runner workspace target synchronization state is missing.'
+    );
+  }
+
+  if (await isRebaseInProgress(localPath)) {
+    try {
+      await continueRebase(localPath);
+    } catch (error) {
+      const conflictFiles = await getConflictedFiles(localPath);
+      if (conflictFiles.length) {
+        recovery.phase = 'conflicts';
+        recovery.conflictFiles = conflictFiles;
+        await writeRunnerState(state);
+        return reportRunnerRecoveryConflicts(state, localPath, progressReports);
+      }
+      if (
+        isEmptyRebaseCommitError(error) &&
+        (await isRebaseInProgress(localPath))
+      ) {
+        try {
+          await skipRebase(localPath);
+        } catch (skipError) {
+          const remaining = await getConflictedFiles(localPath);
+          if (!remaining.length) throw skipError;
+          recovery.phase = 'conflicts';
+          recovery.conflictFiles = remaining;
           await writeRunnerState(state);
           return reportRunnerRecoveryConflicts(
             state,
@@ -69,146 +100,60 @@ export async function finalizeRunnerRebaseRecovery(
             progressReports
           );
         }
-        if (
-          isEmptyRebaseCommitError(error) &&
-          (await isRebaseInProgress(localPath))
-        ) {
-          try {
-            await skipRebase(localPath);
-          } catch (skipError) {
-            const skipConflictFiles = await getConflictedFiles(localPath);
-            if (skipConflictFiles.length) {
-              recovery.phase = 'conflicts';
-              recovery.conflictFiles = skipConflictFiles;
-              await writeRunnerState(state);
-              return reportRunnerRecoveryConflicts(
-                state,
-                localPath,
-                progressReports
-              );
-            }
-            throw skipError;
-          }
-        } else {
-          throw error;
-        }
+      } else {
+        throw error;
       }
     }
-    if (await isRebaseInProgress(localPath)) {
-      recovery.conflictFiles = await getConflictedFiles(localPath);
-      await writeRunnerState(state);
-      return reportRunnerRecoveryConflicts(state, localPath, progressReports);
+  }
+
+  if (await isRebaseInProgress(localPath)) {
+    recovery.phase = 'conflicts';
+    const remainingConflictFiles = await getConflictedFiles(localPath);
+    if (remainingConflictFiles.length) {
+      recovery.conflictFiles = remainingConflictFiles;
     }
-    recovery.phase = 'ready_to_push';
-    recovery.conflictFiles = [];
     await writeRunnerState(state);
+    return reportRunnerRecoveryConflicts(state, localPath, progressReports);
   }
 
-  await assertCurrentRunnerBranch(state, localPath);
-  if (await getWorkingTreeStatus(localPath)) {
-    throw new Error(
-      'Runner workspace must be clean after completing rebase conflict resolution.'
-    );
+  const conflictFiles = await getConflictedFiles(localPath);
+  if (conflictFiles.length) {
+    recovery.phase = 'conflicts';
+    recovery.conflictFiles = conflictFiles;
+    await writeRunnerState(state);
+    return reportRunnerRecoveryConflicts(state, localPath, progressReports);
   }
 
-  const access = await api.getRepositoryAccess(state.repositoryUrl);
-  const effectiveRepositoryUrl = await getEffectiveRepositoryUrl(
-    state.repositoryUrl,
-    localPath
-  );
-  assertAuthorizedRepositoryUrl(
-    access,
-    state.repositoryUrl,
-    effectiveRepositoryUrl
-  );
-  const repository = await validateRepositoryAccess(
-    access,
-    effectiveRepositoryUrl
-  );
-  if (repository.repositoryId !== state.projectPath) {
-    throw new Error(
-      `${providerLabel(
-        access
-      )} repository identity changed during rebase recovery.`
+  if (recovery.mergeRequestUrl) {
+    const access = await api.getRepositoryAccess(state.repositoryUrl);
+    const effectiveRepositoryUrl = await getEffectiveRepositoryUrl(
+      state.repositoryUrl,
+      localPath
     );
-  }
-
-  await withGitCredentials(access, localPath, async (env) => {
-    await Promise.all([
-      fetchBranch(
-        effectiveRepositoryUrl,
-        recovery.sourceBranch,
-        localPath,
-        env
-      ),
-      fetchBranch(
-        effectiveRepositoryUrl,
-        recovery.targetBranch,
-        localPath,
-        env
-      ),
-    ]);
-  });
-  const remoteSourceHead = await getRemoteBranchCommit(
-    recovery.sourceBranch,
-    localPath
-  );
-  if (remoteSourceHead !== recovery.sourceHeadSha) {
-    const recoveryMetadata = createRecoveryProgressMetadata(recovery);
-    if (remoteSourceHead) {
-      await resetBranchToRemote(recovery.sourceBranch, localPath);
-      state.preparedHeadSha = remoteSourceHead;
-      state.commitSha = undefined;
-      state.recovery = undefined;
-      await writeRunnerState(state);
-    }
-    const error =
-      'The provider source branch advanced during rebase recovery; the lease was not acquired and no push was attempted.';
-    progressReports.push(
-      await reportRunnerAgenticRunProgressSafely(
-        state.runKey,
-        state.projectName,
-        {
-          status: 'blocked',
-          repositoryUrl: state.repositoryUrl,
-          branch: state.branch,
-          error,
-          notes: error,
-          metadata: recoveryMetadata,
-        }
-      )
+    assertAuthorizedRepositoryUrl(
+      access,
+      state.repositoryUrl,
+      effectiveRepositoryUrl
     );
-    return {
-      completed: false,
-      workspace: state,
-      progressReports,
-      error,
-      instructions: [
-        'Prepare the project again to reconcile the newly advanced source branch before retrying recovery.',
-      ],
-    };
-  }
-
-  const remoteTargetHead = await getRemoteBranchCommit(
-    recovery.targetBranch,
-    localPath
-  );
-  if (!remoteTargetHead) {
-    throw new Error(
-      'Unable to resolve the target branch before recovery push.'
+    const repository = await validateRepositoryAccess(
+      access,
+      effectiveRepositoryUrl
     );
-  }
-  if (remoteTargetHead !== recovery.targetHeadSha) {
-    if (recovery.attempt >= 3) {
-      const recoveryMetadata = createRecoveryProgressMetadata(recovery);
-      await resetRunnerRecoveryToRemoteSource(
-        state,
-        recovery,
-        localPath,
-        remoteSourceHead
-      );
+    const mergeRequest = await getChangeRequestDetails(
+      access,
+      repository.repositoryId,
+      recovery.mergeRequestUrl
+    );
+    if (
+      mergeRequest.sourceBranch !== recovery.sourceBranch ||
+      mergeRequest.targetBranch !== recovery.targetBranch ||
+      (recovery.sourceHeadSha &&
+        mergeRequest.sourceHeadSha &&
+        mergeRequest.sourceHeadSha !== recovery.sourceHeadSha &&
+        mergeRequest.sourceHeadSha !== state.commitSha)
+    ) {
       const error =
-        'The target branch advanced repeatedly during rebase recovery; retry limit reached without pushing.';
+        'The change request changed during target synchronization; no push was attempted.';
       progressReports.push(
         await reportRunnerAgenticRunProgressSafely(
           state.runKey,
@@ -219,7 +164,10 @@ export async function finalizeRunnerRebaseRecovery(
             branch: state.branch,
             error,
             notes: error,
-            metadata: recoveryMetadata,
+            metadata: {
+              ...createRecoveryProgressMetadata(recovery),
+              mcpTool: 'omniboard_runner_finalize_agentic_run_workspace',
+            },
           }
         )
       );
@@ -229,122 +177,29 @@ export async function finalizeRunnerRebaseRecovery(
         progressReports,
         error,
         instructions: [
-          'Prepare the project again after target-branch activity settles.',
+          'The checkout and migration edits were preserved. Review the changed request branches before retrying synchronization.',
         ],
       };
     }
-    recovery.attempt += 1;
-    recovery.targetHeadSha = remoteTargetHead;
-    try {
-      await startRebase(recovery.targetBranch, localPath);
-    } catch (error) {
-      const conflictFiles = await getConflictedFiles(localPath);
-      if (!conflictFiles.length) throw error;
-      recovery.phase = 'conflicts';
-      recovery.conflictFiles = conflictFiles;
-      await writeRunnerState(state);
-      return reportRunnerRecoveryConflicts(state, localPath, progressReports);
-    }
-    await writeRunnerState(state);
   }
 
-  const commitSha = (await getHeadCommit(localPath)).sha;
-  const mergeRequest = await getChangeRequestDetails(
+  const access = await api.getRepositoryAccess(state.repositoryUrl);
+  const repositoryUrl = await getEffectiveRepositoryUrl(
+    state.repositoryUrl,
+    localPath
+  );
+  assertAuthorizedRepositoryUrl(access, state.repositoryUrl, repositoryUrl);
+  await prepareRunnerTargetSynchronization(
+    state,
+    localPath,
+    repositoryUrl,
     access,
-    state.projectPath,
     recovery.mergeRequestUrl
   );
-  if (
-    mergeRequest.sourceBranch !== recovery.sourceBranch ||
-    mergeRequest.targetBranch !== recovery.targetBranch ||
-    (mergeRequest.sourceHeadSha &&
-      mergeRequest.sourceHeadSha !== recovery.sourceHeadSha)
-  ) {
-    const recoveryMetadata = createRecoveryProgressMetadata(recovery);
-    await resetRunnerRecoveryToRemoteSource(
-      state,
-      recovery,
-      localPath,
-      remoteSourceHead
-    );
-    const error =
-      'The change request changed during rebase recovery; no push was attempted.';
-    progressReports.push(
-      await reportRunnerAgenticRunProgressSafely(
-        state.runKey,
-        state.projectName,
-        {
-          status: 'blocked',
-          repositoryUrl: state.repositoryUrl,
-          branch: state.branch,
-          error,
-          notes: error,
-          metadata: recoveryMetadata,
-        }
-      )
-    );
-    return {
-      completed: false,
-      workspace: state,
-      progressReports,
-      error,
-      instructions: [
-        'Prepare the project again to reconcile the current change-request branches before retrying recovery.',
-      ],
-    };
+  if (state.recovery?.phase === 'conflicts') {
+    return reportRunnerRecoveryConflicts(state, localPath, progressReports);
   }
-  await withGitCredentials(access, localPath, (env) =>
-    pushBranchWithLease(
-      effectiveRepositoryUrl,
-      recovery.sourceBranch,
-      recovery.sourceHeadSha,
-      localPath,
-      env
-    )
-  );
-  state.recovery = undefined;
-  state.preparedHeadSha = commitSha;
-  state.commitSha = commitSha;
-  await writeRunnerState(state, 'pushed');
-  progressReports.push(
-    await reportRunnerAgenticRunProgressSafely(
-      state.runKey,
-      state.projectName,
-      {
-        status: 'pushed',
-        repositoryUrl: state.repositoryUrl,
-        branch: state.branch,
-        commitSha,
-        mergeRequestUrl: mergeRequest.url,
-        mergeRequestState: mergeRequest.state,
-        notes: `Rebased "${state.branch}" onto "${state.targetBranch}" and pushed with force-with-lease.`,
-        metadata: {
-          mcpTool: 'omniboard_runner_finalize_agentic_run_workspace',
-          remediation: 'rebase',
-          remediationPhase: 'pushed',
-          targetBranch: state.targetBranch,
-        },
-      }
-    )
-  );
-  let refreshError: string | undefined;
-  try {
-    await api.refreshAgenticRunProjectState(state.runKey, state.projectName);
-  } catch (error) {
-    refreshError =
-      'The branch was pushed successfully, but refreshing provider state failed: ' +
-      (error instanceof Error ? error.message : String(error));
-  }
-
-  await releaseRunnerExecution(state.executionKey);
-  return {
-    completed: true,
-    workspace: state,
-    commitSha,
-    mergeRequest,
-    progressReports,
-    ...(refreshError ? { instructions: [refreshError] } : {}),
-  };
+  return { completed: false, workspace: state, progressReports };
 }
 
 async function reportRunnerRecoveryConflicts(
@@ -384,125 +239,235 @@ async function reportRunnerRecoveryConflicts(
   };
 }
 
-export async function prepareRunnerRebaseRecovery(
+export async function prepareRunnerTargetSynchronization(
   state: RunnerWorkspaceState,
   localPath: string,
   repositoryUrl: string,
   access: RepositoryAccess,
-  changeRequest: SourceControlChangeRequestDetails,
-  fallbackDetailedStatus?: string | null,
-  providerRebaseFailure?: string
+  mergeRequestUrl?: string | null,
+  checkpointCurrentTarget = false
 ) {
-  if (state.recovery) {
-    return;
-  }
-
-  const detailedStatus =
-    normalizeProviderStatus(changeRequest.detailedStatus) ||
-    normalizeProviderStatus(fallbackDetailedStatus);
-  if (
-    detailedStatus !== 'conflict' &&
-    detailedStatus !== 'need_rebase' &&
-    detailedStatus !== 'cannot_be_merged'
-  ) {
-    return;
-  }
-
-  const workingTreeStatus = await getWorkingTreeStatus(localPath);
-  if (workingTreeStatus) {
+  if (state.recovery) state.recovery.kind = 'target_sync';
+  if (state.recovery && state.recovery.targetBranch !== state.targetBranch) {
     throw new Error(
-      'Cannot start mergeability recovery while the runner workspace has local changes.'
+      'The change request target changed during synchronization; the checkout and migration edits were preserved.'
     );
   }
-  await withGitCredentials(access, localPath, (env) =>
-    fetchBranch(repositoryUrl, changeRequest.targetBranch, localPath, env)
-  );
-  const sourceHeadSha = await getRemoteBranchCommit(
-    changeRequest.sourceBranch,
-    localPath
-  );
+
+  let sourceHeadSha: string | null = null;
+  await withGitCredentials(access, localPath, async (env) => {
+    sourceHeadSha = await fetchBranchIfExists(
+      repositoryUrl,
+      state.branch,
+      localPath,
+      env
+    );
+    await fetchBranch(repositoryUrl, state.targetBranch, localPath, env);
+  });
   const targetHeadSha = await getRemoteBranchCommit(
-    changeRequest.targetBranch,
+    state.targetBranch,
     localPath
   );
-  if (!sourceHeadSha || !targetHeadSha) {
+  if (!targetHeadSha) {
     throw new Error(
-      'Unable to resolve source and target branch commits for mergeability recovery.'
+      'Unable to resolve configured target branch "' +
+        state.targetBranch +
+        '" before runner work.'
     );
   }
+
+  // Refresh refs during conflict recovery, but finish the current rebase before
+  // starting another one against a newer target.
   if (
-    changeRequest.sourceHeadSha &&
-    changeRequest.sourceHeadSha !== sourceHeadSha
+    state.recovery &&
+    ((await isRebaseInProgress(localPath)) ||
+      (await getConflictedFiles(localPath)).length)
   ) {
-    throw new Error(
-      'Provider source branch advanced while mergeability recovery was being prepared.'
-    );
-  }
-  const head = await getHeadCommit(localPath);
-  if (head.sha !== sourceHeadSha) {
-    throw new Error(
-      'Runner workspace HEAD does not match the provider source branch before rebase.'
-    );
+    state.recovery.phase = 'conflicts';
+    state.recovery.conflictFiles = await getConflictedFiles(localPath);
+    await writeRunnerState(state);
+    return;
   }
 
-  const recovery: RunnerWorkspaceRebaseRecovery = {
-    kind: 'rebase',
-    phase: 'ready_to_push',
-    mergeRequestUrl: changeRequest.url,
-    sourceBranch: changeRequest.sourceBranch,
-    targetBranch: changeRequest.targetBranch,
-    sourceHeadSha,
-    targetHeadSha,
-    attempt: 1,
-    conflictFiles: [],
-  };
-  state.targetBranch = changeRequest.targetBranch;
-  state.recovery = recovery;
-
-  try {
-    await startRebase(changeRequest.targetBranch, localPath);
-  } catch (error) {
-    const conflictFiles = await getConflictedFiles(localPath);
-    if (!conflictFiles.length) {
-      state.recovery = undefined;
-      throw error;
+  let head = await getHeadCommit(localPath);
+  if (
+    state.recovery &&
+    sourceHeadSha !== (state.recovery.sourceHeadSha ?? null)
+  ) {
+    if (sourceHeadSha === state.commitSha && head.sha === state.commitSha) {
+      // The push may have succeeded before its response/checkpoint was lost.
+      state.recovery.sourceHeadSha = sourceHeadSha ?? undefined;
+    } else {
+      throw new Error(
+        'The provider source branch advanced after target synchronization; the checkout and migration edits were preserved and no push was attempted.'
+      );
     }
-    recovery.phase = 'conflicts';
-    recovery.conflictFiles = conflictFiles;
   }
 
-  state.preparedHeadSha = (await getHeadCommit(localPath)).sha;
-  state.commitSha = undefined;
-  await writeRunnerState(state);
-
-  if (providerRebaseFailure) {
-    await reportRunnerAgenticRunProgressSafely(
-      state.runKey,
-      state.projectName,
-      {
-        status: 'in_progress',
-        repositoryUrl: state.repositoryUrl,
-        branch: state.branch,
-        notes:
-          'Provider-native rebase was unavailable, so MCP CLI started a local rebase: ' +
-          providerRebaseFailure,
-        metadata: createRecoveryProgressMetadata(recovery),
-      }
+  if (
+    state.recovery?.stashRef &&
+    (state.recovery.stashApplied ||
+      (await isAncestor(state.recovery.targetHeadSha, head.sha, localPath)))
+  ) {
+    if (!(await restoreTargetSynchronizationStash(state, localPath))) return;
+  }
+  const sourceNeedsFastForward =
+    Boolean(sourceHeadSha) &&
+    sourceHeadSha !== head.sha &&
+    (await isAncestor(head.sha, sourceHeadSha!, localPath));
+  if (
+    !state.recovery &&
+    sourceHeadSha &&
+    sourceHeadSha !== head.sha &&
+    !sourceNeedsFastForward &&
+    !(await isAncestor(sourceHeadSha, head.sha, localPath))
+  ) {
+    throw new RunnerWorkspaceReconciliationError(
+      'The retained runner workspace and provider source branch have diverged.'
     );
   }
+  const targetNeedsRebase = !(await isAncestor(
+    targetHeadSha,
+    sourceNeedsFastForward ? sourceHeadSha! : head.sha,
+    localPath
+  ));
+  if (!sourceNeedsFastForward && !targetNeedsRebase) {
+    if (
+      !state.recovery &&
+      checkpointCurrentTarget &&
+      state.phase === 'prepared'
+    ) {
+      state.recovery = {
+        kind: 'target_sync',
+        phase: 'ready_to_push',
+        mergeRequestUrl: mergeRequestUrl ?? null,
+        sourceBranch: state.branch,
+        targetBranch: state.targetBranch,
+        sourceHeadSha: sourceHeadSha ?? undefined,
+        targetHeadSha,
+        attempt: 1,
+        conflictFiles: [],
+      };
+    }
+    if (state.recovery) {
+      if (!(await restoreTargetSynchronizationStash(state, localPath))) return;
+      state.recovery.phase = 'ready_to_push';
+      state.recovery.conflictFiles = [];
+    }
+    if (!state.commitSha) state.preparedHeadSha = head.sha;
+    await writeRunnerState(state);
+    return;
+  }
+
+  if (state.recovery?.phase === 'conflicts') {
+    state.recovery.phase = 'ready_to_push';
+    state.recovery.conflictFiles = [];
+    await writeRunnerState(state);
+  }
+  const previousRecovery = state.recovery ? { ...state.recovery } : undefined;
+  const previousPreparedHead = state.preparedHeadSha;
+  const previousCommit = state.commitSha;
+  const status = await getWorkingTreeStatus(localPath);
+  if (state.recovery?.stashRef && status) {
+    throw new Error(
+      'Target synchronization has both a preserved stash and additional local edits. Preserve those edits before resuming the pending synchronization.'
+    );
+  }
+  const newStashRef = status ? await stashWorkingTree(localPath) : undefined;
+  state.recovery = {
+    kind: 'target_sync',
+    phase: 'in_progress',
+    mergeRequestUrl:
+      previousRecovery?.mergeRequestUrl ?? mergeRequestUrl ?? null,
+    sourceBranch: state.branch,
+    targetBranch: state.targetBranch,
+    sourceHeadSha:
+      previousRecovery?.sourceHeadSha ?? sourceHeadSha ?? undefined,
+    targetHeadSha,
+    attempt: previousRecovery
+      ? previousRecovery.attempt +
+        (previousRecovery.targetHeadSha !== targetHeadSha ? 1 : 0)
+      : 1,
+    conflictFiles: [],
+    ...(newStashRef ?? previousRecovery?.stashRef
+      ? { stashRef: newStashRef ?? previousRecovery?.stashRef }
+      : {}),
+  };
+  state.preparedHeadSha = head.sha;
+  state.commitSha = undefined;
+  try {
+    // Save the source lease, target and exact stash before changing HEAD.
+    await writeRunnerState(state, 'prepared');
+  } catch (error) {
+    state.recovery = previousRecovery;
+    state.preparedHeadSha = previousPreparedHead;
+    state.commitSha = previousCommit;
+    if (newStashRef)
+      await restoreStashAfterFailure(newStashRef, localPath, error);
+    throw error;
+  }
+
+  if (sourceNeedsFastForward) await fastForwardBranch(state.branch, localPath);
+  if (targetNeedsRebase) {
+    try {
+      await startRebase(state.targetBranch, localPath);
+    } catch (error) {
+      const conflictFiles = await getConflictedFiles(localPath);
+      if (!conflictFiles.length && !(await isRebaseInProgress(localPath)))
+        throw error;
+      state.recovery!.phase = 'conflicts';
+      state.recovery!.conflictFiles = conflictFiles;
+      state.preparedHeadSha = (await getHeadCommit(localPath)).sha;
+      await writeRunnerState(state);
+      return;
+    }
+  }
+  head = await getHeadCommit(localPath);
+  state.preparedHeadSha = head.sha;
+  await writeRunnerState(state);
+  if (!(await restoreTargetSynchronizationStash(state, localPath))) return;
+  state.recovery!.phase = 'ready_to_push';
+  state.recovery!.conflictFiles = [];
+  await writeRunnerState(state);
 }
 
-async function resetRunnerRecoveryToRemoteSource(
+async function restoreTargetSynchronizationStash(
   state: RunnerWorkspaceState,
-  recovery: RunnerWorkspaceRebaseRecovery,
-  localPath: string,
-  remoteSourceHead: string
+  localPath: string
 ) {
-  await resetBranchToRemote(recovery.sourceBranch, localPath);
-  state.preparedHeadSha = remoteSourceHead;
-  state.commitSha = undefined;
-  state.recovery = undefined;
+  if (!state.recovery?.stashRef) return true;
+  const stashEntry = await getRecoveryStashEntry(state.recovery, localPath);
+  if (!state.recovery.stashApplied) {
+    if (!stashEntry) {
+      throw new Error(
+        'The preserved working-tree stash "' +
+          state.recovery.stashRef +
+          '" is unavailable before it was applied.'
+      );
+    }
+    if (state.recovery.phase === 'ready_to_push') {
+      state.recovery.phase = 'in_progress';
+      await writeRunnerState(state, 'prepared');
+    }
+    try {
+      await applyStash(stashEntry.commitSha, localPath);
+    } catch (error) {
+      const conflictFiles = await getConflictedFiles(localPath);
+      if (!conflictFiles.length) throw error;
+      state.recovery!.phase = 'conflicts';
+      state.recovery!.conflictFiles = conflictFiles;
+      state.recovery!.stashApplied = true;
+      await writeRunnerState(state);
+      return false;
+    }
+    state.recovery!.stashApplied = true;
+    await writeRunnerState(state);
+  }
+  if (stashEntry) await dropStash(stashEntry.commitSha, localPath);
+  delete state.recovery!.stashRef;
+  delete state.recovery!.stashApplied;
   await writeRunnerState(state);
+  return true;
 }
 
 export async function reconcileRunnerRecoveryWorkspace(
@@ -521,22 +486,13 @@ export async function reconcileRunnerRecoveryWorkspace(
   if (!recovery) return;
 
   const rebaseInProgress = await isRebaseInProgress(localPath);
-  if (recovery.phase === 'conflicts' && rebaseInProgress) {
+  recovery.kind = 'target_sync';
+  if (rebaseInProgress) {
+    recovery.phase = 'conflicts';
     recovery.conflictFiles = await getConflictedFiles(localPath);
     await writeRunnerState(state);
     return;
   }
-  if (recovery.phase === 'conflicts') {
-    throw new RunnerWorkspaceReconciliationError(
-      'DB execution state expects rebase conflicts, but the retained checkout has no rebase in progress.'
-    );
-  }
-  if (rebaseInProgress) {
-    throw new RunnerWorkspaceReconciliationError(
-      'The retained checkout has an in-progress rebase not present in DB recovery state.'
-    );
-  }
-
   try {
     await assertCurrentRunnerBranch(state, localPath);
   } catch (error) {
@@ -545,23 +501,40 @@ export async function reconcileRunnerRecoveryWorkspace(
       error
     );
   }
-  if (await getWorkingTreeStatus(localPath)) {
-    throw new RunnerWorkspaceReconciliationError(
-      'Recovered runner workspace has local changes outside an in-progress rebase.'
-    );
+  const conflictFiles = await getConflictedFiles(localPath);
+  if (conflictFiles.length) {
+    recovery.phase = 'conflicts';
+    recovery.conflictFiles = conflictFiles;
   }
-  const head = await getHeadCommit(localPath);
-  if (head.sha !== state.preparedHeadSha) {
-    throw new RunnerWorkspaceReconciliationError(
-      'The retained recovery checkout HEAD no longer matches DB execution state.'
-    );
-  }
+  await writeRunnerState(state);
 }
 
 function recoveryReconciliationError(message: string, cause: unknown) {
   return new RunnerWorkspaceReconciliationError(
     message + ' ' + (cause instanceof Error ? cause.message : String(cause))
   );
+}
+
+async function getRecoveryStashEntry(
+  recovery: RunnerWorkspaceRebaseRecovery,
+  localPath: string
+) {
+  const stashRef = recovery.stashRef;
+  if (!stashRef) return null;
+  const stashEntry = await getStashEntry(stashRef, localPath);
+  if (
+    stashEntry &&
+    stashRef.startsWith('stash@{') &&
+    !stashEntry.message.includes('omniboard-runner-target-sync')
+  ) {
+    throw new RunnerWorkspaceReconciliationError(
+      `Persisted legacy stash reference "${stashRef}" now points to an unrelated stash; refusing to apply or drop it.`
+    );
+  }
+  if (stashEntry) {
+    recovery.stashRef = stashEntry.commitSha;
+  }
+  return stashEntry;
 }
 
 export function createRecoveryProgressMetadata(
@@ -583,6 +556,19 @@ export function formatRecoveryProgressNote(state: RunnerWorkspaceState) {
   if (!recovery) {
     return 'Prepared dedicated runner workspace for mergeability recovery.';
   }
+  if (recovery.kind === 'target_sync') {
+    if (recovery.phase === 'conflicts') {
+      return (
+        'Resolving target-branch synchronization conflicts while rebasing "' +
+        recovery.sourceBranch +
+        '" onto "' +
+        recovery.targetBranch +
+        '": ' +
+        recovery.conflictFiles.join(', ')
+      );
+    }
+    return `Synchronized "${recovery.sourceBranch}" onto the latest "${recovery.targetBranch}" and awaiting finalization.`;
+  }
   if (recovery.phase === 'conflicts') {
     return (
       'Resolving merge conflicts while rebasing "' +
@@ -596,8 +582,24 @@ export function formatRecoveryProgressNote(state: RunnerWorkspaceState) {
   return `Rebased "${recovery.sourceBranch}" onto "${recovery.targetBranch}" and awaiting verification before push.`;
 }
 
-function normalizeProviderStatus(value?: string | null) {
-  return value?.trim().toLowerCase() ?? '';
+async function restoreStashAfterFailure(
+  stashRef: string,
+  localPath: string,
+  originalError: unknown
+) {
+  try {
+    await applyStash(stashRef, localPath);
+    await dropStash(stashRef, localPath);
+  } catch (restoreError) {
+    throw new Error(
+      toErrorMessage(originalError) +
+        ' The preserved runner workspace changes remain in ' +
+        stashRef +
+        ', but restoring them failed: ' +
+        toErrorMessage(restoreError),
+      { cause: originalError }
+    );
+  }
 }
 
 function isEmptyRebaseCommitError(error: unknown) {
@@ -627,9 +629,16 @@ export function createRecoveryWorkspaceInstructions(
     ? 'Resolve only the current rebase conflicts in: ' +
       state.recovery.conflictFiles.join(', ') +
       '. Do not run git rebase, commit, or push commands yourself.'
+    : state.recovery.kind === 'target_sync'
+    ? 'The target branch synchronization completed without file conflicts. Continue the requested project work, then finalize the workspace.'
     : 'The rebase completed without file conflicts. Verify the project before finalization.';
+  const targetSyncNote =
+    state.recovery.kind === 'target_sync'
+      ? 'The prepared source branch includes the latest target branch. Preserve the target changes while completing the requested work.'
+      : '';
   return [
     'Work only inside ' + state.localPath + '.',
+    ...(targetSyncNote ? [targetSyncNote] : []),
     conflictInstruction,
     'Preserve the intended changes from both the target branch and the agentic branch.',
     'Run relevant tests, lint, or build commands before finalizing.',

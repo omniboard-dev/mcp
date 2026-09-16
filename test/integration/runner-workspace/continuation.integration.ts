@@ -313,8 +313,8 @@ export async function runPostMergeRequestContinuationIntegration(context: any) {
     assert.equal(await fs.readFile(ambientSecretLeakPath, 'utf8'), 'unset');
   }
 
-  assert.equal(state.mergeRequestCreateCount, 2);
-  assert.equal(state.mergeRequestLookupCount, 1);
+  assert.equal(state.mergeRequestCreateCount, 3);
+  assert.equal(state.mergeRequestLookupCount, 2);
   await assert.rejects(fs.access(path.join(runnerRoot, 'state')));
   assert.equal(state.mergeRequestPayload.source_branch, 'agentic/run-icons');
   assert.equal(state.mergeRequestPayload.target_branch, 'main');

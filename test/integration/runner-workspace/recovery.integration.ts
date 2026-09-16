@@ -103,7 +103,7 @@ export async function runWorkspaceRecoveryIntegration(context: any) {
   state.projectMergeRequestState = 'opened';
   state.projectMergeRequestDetailedStatus = 'need_rebase';
   state.mergeRequestDetailedStatus = 'need_rebase';
-  state.mergeRequestRebaseInProgress = false;
+  state.mergeRequestRebaseInProgress = true;
   const nativeRebasePreparation = await prepareRunnerWorkspace({
     runKey: 'run-icons',
     projectName: 'project-a',
@@ -114,7 +114,7 @@ export async function runWorkspaceRecoveryIntegration(context: any) {
     'automatic_rebase_requested'
   );
   assert.equal(nativeRebasePreparation.workspace, undefined);
-  assert.equal(state.mergeRequestRebaseRequestCount, 1);
+  assert.equal(state.mergeRequestRebaseRequestCount, 0);
   assert.equal(progress.at(-1).status, 'in_progress');
   state.mergeRequestDetailedStatus = 'mergeable';
   state.mergeRequestRebaseInProgress = false;
@@ -183,13 +183,13 @@ export async function runWorkspaceRecoveryIntegration(context: any) {
     runKey: 'run-icons',
     projectName: 'project-a',
   });
-  assert.notEqual(
+  assert.equal(
     conflictPreparation.workspace.localPath,
     pathBeforeFailedRecovery
   );
   assert.equal(
     conflictPreparation.workspace.generation,
-    generationBeforeFailedRecovery + 1
+    generationBeforeFailedRecovery
   );
   prepared.workspace = conflictPreparation.workspace;
   assert.equal(
@@ -259,8 +259,11 @@ export async function runWorkspaceRecoveryIntegration(context: any) {
     assert.deepEqual(changedRequestFinalization.conflictFiles, ['README.md']);
   }
   assert.match(changedRequestFinalization.error, /change request changed/);
-  assert.equal(changedRequestFinalization.workspace.recovery, undefined);
   assert.equal(
+    changedRequestFinalization.workspace.recovery.kind,
+    'target_sync'
+  );
+  assert.notEqual(
     (
       await execFile('git', ['rev-parse', 'HEAD'], {
         cwd: prepared.workspace.localPath,
@@ -285,7 +288,7 @@ export async function runWorkspaceRecoveryIntegration(context: any) {
   assert.equal(restartedConflictPreparation.workspace.recovery.attempt, 1);
   assert.equal(
     restartedConflictPreparation.workspace.recovery.phase,
-    'conflicts'
+    'ready_to_push'
   );
 
   // Exhaust the provider GET retry budget so recovery after a persistent
@@ -293,7 +296,7 @@ export async function runWorkspaceRecoveryIntegration(context: any) {
   state.mergeRequestLookupFailures = 3;
   let conflictFinalized;
   let lookupFailureObserved = false;
-  let needsConflictResolution = true;
+  let needsConflictResolution = false;
   for (let attempt = 0; attempt < 8; attempt += 1) {
     if (needsConflictResolution) {
       await resolveCurrentConflict();
@@ -341,12 +344,12 @@ export async function runWorkspaceRecoveryIntegration(context: any) {
     { cwd: seedPath }
   );
 
-  const exhaustedPreparation = await prepareRunnerWorkspace({
+  const legacyPreparation = await prepareRunnerWorkspace({
     runKey: 'run-icons',
     projectName: 'project-a',
   });
-  const exhaustedRecoveryState = exhaustedPreparation.workspace;
-  exhaustedRecoveryState.recovery = {
+  const legacyRecoveryState = legacyPreparation.workspace;
+  legacyRecoveryState.recovery = {
     kind: 'rebase',
     phase: 'ready_to_push',
     mergeRequestUrl:
@@ -358,7 +361,7 @@ export async function runWorkspaceRecoveryIntegration(context: any) {
     attempt: 3,
     conflictFiles: [],
   };
-  await writeRunnerState(exhaustedRecoveryState);
+  await writeRunnerState(legacyRecoveryState);
 
   await execFile('git', ['checkout', 'main'], { cwd: seedPath });
   await execFile('git', ['pull', '--ff-only', 'origin', 'main'], {
@@ -371,38 +374,13 @@ export async function runWorkspaceRecoveryIntegration(context: any) {
     await execFile('git', ['rev-parse', 'refs/heads/main'], { cwd: remotePath })
   ).stdout.trim();
 
-  const exhaustedFinalization = await finalizeRunnerWorkspace({
+  const legacyFinalization = await finalizeRunnerWorkspace({
     runKey: 'run-icons',
     projectName: 'project-a',
     localPath: prepared.workspace.localPath,
   });
-  assert.equal(exhaustedFinalization.completed, false);
-  assert.match(exhaustedFinalization.error, /retry limit reached/);
-  assert.equal(exhaustedFinalization.workspace.recovery, undefined);
-  assert.equal(
-    (
-      await execFile('git', ['rev-parse', 'HEAD'], {
-        cwd: prepared.workspace.localPath,
-      })
-    ).stdout.trim(),
-    remoteFeatureHead
-  );
-
-  const restartedExhaustedRecovery = await prepareRunnerWorkspace({
-    runKey: 'run-icons',
-    projectName: 'project-a',
-  });
-  assert.equal(restartedExhaustedRecovery.workspace.recovery.attempt, 1);
-  assert.equal(
-    restartedExhaustedRecovery.workspace.recovery.targetHeadSha,
-    remoteMainHead
-  );
-  const completedExhaustedRecovery = await finalizeRunnerWorkspace({
-    runKey: 'run-icons',
-    projectName: 'project-a',
-    localPath: prepared.workspace.localPath,
-  });
-  assert.equal(completedExhaustedRecovery.completed, true);
+  assert.equal(legacyFinalization.completed, true);
+  assert.equal(legacyFinalization.workspace.recovery, undefined);
 
   await execFile('git', ['fetch', 'origin'], { cwd: seedPath });
   remoteFeatureHead = (
@@ -440,10 +418,124 @@ export async function runWorkspaceRecoveryIntegration(context: any) {
       report.error?.includes('change request changed')
     )
   );
+
+  assert(recoveryReports.some((report) => report.status === 'pushed'));
+
+  state.projectProgressStatus = 'in_progress';
+  state.projectMergeRequestUrl = null;
+  state.projectMergeRequestState = null;
+  state.projectMergeRequestDetailedStatus = null;
+  await execFile('git', ['checkout', 'agentic/run-icons'], { cwd: seedPath });
+  await execFile('git', ['fetch', 'origin', 'agentic/run-icons'], {
+    cwd: seedPath,
+  });
+  await execFile(
+    'git',
+    ['reset', '--hard', 'refs/remotes/origin/agentic/run-icons'],
+    { cwd: seedPath }
+  );
+  await fs.writeFile(path.join(seedPath, 'no-mr-target-sync.txt'), 'source\n');
+  await commitForTest(seedPath, 'Add source target-sync conflict');
+  await execFile('git', ['push', 'origin', 'agentic/run-icons'], {
+    cwd: seedPath,
+  });
+  await execFile('git', ['checkout', 'main'], { cwd: seedPath });
+  await execFile('git', ['pull', '--ff-only', 'origin', 'main'], {
+    cwd: seedPath,
+  });
+  await fs.writeFile(path.join(seedPath, 'no-mr-target-sync.txt'), 'target\n');
+  await commitForTest(seedPath, 'Add target target-sync conflict');
+  await execFile('git', ['push', 'origin', 'main'], { cwd: seedPath });
+
+  const retainedStagedPath = path.join(
+    prepared.workspace.localPath,
+    'retained-staged.txt'
+  );
+  const retainedUnstagedPath = path.join(
+    prepared.workspace.localPath,
+    'retained-unstaged.txt'
+  );
+  await fs.writeFile(retainedStagedPath, 'staged recovery work\n');
+  await execFile('git', ['add', 'retained-staged.txt'], {
+    cwd: prepared.workspace.localPath,
+  });
+  await fs.writeFile(retainedUnstagedPath, 'unstaged recovery work\n');
+
+  const noMrConflictPreparation = await prepareRunnerWorkspace({
+    runKey: 'run-icons',
+    projectName: 'project-a',
+  });
+  assert.equal(noMrConflictPreparation.workspace.recovery.kind, 'target_sync');
+  assert.equal(
+    noMrConflictPreparation.workspace.recovery.mergeRequestUrl,
+    null
+  );
+  assert.equal(noMrConflictPreparation.workspace.recovery.phase, 'conflicts');
+  assert.match(
+    noMrConflictPreparation.workspace.recovery.stashRef,
+    /^[a-f0-9]{40}$/
+  );
+  prepared.workspace = noMrConflictPreparation.workspace;
+  state.projectProgressStatus = 'blocked';
+  state.rejectRecoveryConflictAcquire = true;
+
+  const noMrWorkspacePath = noMrConflictPreparation.workspace.localPath;
+  await fs.writeFile(
+    path.join(noMrWorkspacePath, 'no-mr-target-sync.txt'),
+    'target\n\nfeature resolution\n'
+  );
+  await execFile('git', ['add', 'no-mr-target-sync.txt'], {
+    cwd: noMrWorkspacePath,
+  });
+  await execFile('git', ['-c', 'core.editor=true', 'rebase', '--continue'], {
+    cwd: noMrWorkspacePath,
+  });
+  const staleStashRef = noMrConflictPreparation.workspace.recovery.stashRef;
+  await execFile('git', ['stash', 'apply', '--index', staleStashRef], {
+    cwd: noMrWorkspacePath,
+  });
+  const stashList = (
+    await execFile('git', ['stash', 'list', '--format=%H%x00%gd'], {
+      cwd: noMrWorkspacePath,
+    })
+  ).stdout
+    .trim()
+    .split('\n');
+  const staleStashSelector = stashList
+    .find((entry) => entry.startsWith(`${staleStashRef}\0`))
+    ?.split('\0')[1];
+  assert.ok(staleStashSelector);
+  await execFile('git', ['stash', 'drop', staleStashSelector], {
+    cwd: noMrWorkspacePath,
+  });
+  noMrConflictPreparation.workspace.recovery.stashApplied = true;
+  await writeRunnerState(noMrConflictPreparation.workspace);
+  state.runnerPhaseTransitions.length = 0;
+
+  const acquireCountBeforeNoMrFinalization = state.runnerAcquireCount;
+  const noMrFinalization = await finalizeRunnerWorkspace({
+    runKey: 'run-icons',
+    projectName: 'project-a',
+    localPath: noMrConflictPreparation.workspace.localPath,
+    mergeRequestTitle: 'Resolve target synchronization',
+  });
+  assert.equal(noMrFinalization.completed, true);
+  assert.equal(state.runnerAcquireCount, acquireCountBeforeNoMrFinalization);
+  assert.equal(
+    await fs.readFile(retainedStagedPath, 'utf8'),
+    'staged recovery work\n'
+  );
+  assert.equal(
+    await fs.readFile(retainedUnstagedPath, 'utf8'),
+    'unstaged recovery work\n'
+  );
   assert(
-    recoveryReports.some((report) =>
-      report.error?.includes('retry limit reached')
+    state.runnerPhaseTransitions.includes(
+      'recovery_conflicts->recovery_ready_to_push'
     )
   );
-  assert(recoveryReports.some((report) => report.status === 'pushed'));
+  assert(
+    state.runnerPhaseTransitions.includes('recovery_ready_to_push->pushed')
+  );
+  state.rejectRecoveryConflictAcquire = false;
 }

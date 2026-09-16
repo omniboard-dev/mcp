@@ -33,6 +33,7 @@ interface ActiveLease {
   identity: string;
   runKey: string;
   projectName: string;
+  execution: RunnerExecution;
   token: string;
   expiresAt: number;
   acquiredAt: number;
@@ -89,6 +90,7 @@ export async function acquireRunnerExecution(
     identity,
     input.runKey,
     input.projectName,
+    response.execution,
     response.execution.executionKey,
     response.leaseToken,
     response.execution.leaseExpiresAt
@@ -112,6 +114,8 @@ export async function checkpointRunnerExecution(
     expectedStateVersion: execution.stateVersion,
     ...patch,
   });
+  const lease = requireLease(execution.executionKey);
+  lease.execution = updated;
   markWorkActivity(execution.executionKey);
   return updated;
 }
@@ -126,6 +130,8 @@ export async function reinitializeRunnerExecution(
       expectedStateVersion: execution.stateVersion,
     }
   );
+  const lease = requireLease(execution.executionKey);
+  lease.execution = updated;
   markWorkActivity(execution.executionKey);
   return updated;
 }
@@ -155,6 +161,8 @@ export async function writeRunnerState(
     commitSha: state.commitSha ?? null,
     recovery: state.recovery ?? null,
   });
+  const lease = requireLease(state.executionKey);
+  lease.execution = execution;
   applyExecutionToWorkspace(state, execution);
   markWorkActivity(state.executionKey);
 }
@@ -262,6 +270,17 @@ export function hasActiveRunnerExecutionLease(
   return executionKey ? Boolean(getActiveLease(executionKey)) : false;
 }
 
+export function getActiveRunnerExecution(
+  runKey: string,
+  projectName: string
+): RunnerExecution | undefined {
+  const executionKey = executionKeysByIdentity.get(
+    executionIdentity(runKey, projectName)
+  );
+  const lease = executionKey ? getActiveLease(executionKey) : undefined;
+  return lease?.execution;
+}
+
 export interface RunnerExecutionHeartbeatResult {
   runKey: string;
   projectName: string;
@@ -365,6 +384,7 @@ function registerLease(
   identity: string,
   runKey: string,
   projectName: string,
+  execution: RunnerExecution,
   executionKey: string,
   token: string,
   leaseExpiresAt: string | null
@@ -384,6 +404,7 @@ function registerLease(
     identity,
     runKey,
     projectName,
+    execution,
     token,
     expiresAt,
     acquiredAt: existing?.acquiredAt ?? now,

@@ -11,8 +11,23 @@ import { runPostMergeRequestContinuationIntegration } from './runner-workspace/c
 import { runWorkspaceCredentialsIntegration } from './runner-workspace/credentials.integration.ts';
 import { runWorkspacePreparationIntegration } from './runner-workspace/preparation.integration.ts';
 import { runWorkspaceRecoveryIntegration } from './runner-workspace/recovery.integration.ts';
+import { runTargetSyncRecoveryIntegration } from './runner-workspace/target-sync-recovery.integration.ts';
 
-const execFile = promisify(cp.execFile);
+const execFileAsync = promisify(cp.execFile);
+const execFile = (
+  command: string,
+  args: string[],
+  options: cp.ExecFileOptions = {}
+) => {
+  // Fixture Git operations must not contaminate the filter probes that verify
+  // the runner's own environment isolation. Production calls still receive
+  // process.env and must sanitize these values themselves.
+  const env = { ...process.env, ...options.env };
+  delete env.UNRELATED_RUNNER_SECRET;
+  delete env.OMNIBOARD_API_KEY;
+  delete env.OMNIBOARD_API_KEY_MCP_CLI;
+  return execFileAsync(command, args, { ...options, env, encoding: 'utf8' });
+};
 const root = await fs.mkdtemp(
   path.join(os.tmpdir(), 'omniboard-mcp-runner-test-')
 );
@@ -54,6 +69,8 @@ const state: Record<string, any> = {
   canPush: true,
   projectArchived: false,
   projectProgressStatus: 'pending',
+  projectProgressMetadata: null,
+  failLookupAfterPush: false,
   projectProgressResolution: null,
   projectRetryInstructions: [],
   projectProgressBranch: 'agentic/run-icons',
@@ -69,9 +86,14 @@ const state: Record<string, any> = {
   projectFulfillment: 'fulfilled',
   providerSyncSuccess: true,
   runnerExecution: null,
+  runnerAcquireCount: 0,
+  rejectRecoveryConflictAcquire: false,
   runnerLeaseToken: null,
   recoveryCheckpointFailures: 0,
+  recoveryCheckpointSkip: 0,
+  pushedCheckpointFailures: 0,
   runnerCompletionByIdentityPhases: [],
+  runnerPhaseTransitions: [],
 };
 
 function matchedProject(fulfillment: string, value: boolean | string) {
@@ -131,6 +153,7 @@ try {
       request.method === 'POST' &&
       url.pathname === '/mcp-cli/run-executions/acquire'
     ) {
+      state.runnerAcquireCount += 1;
       let execution = state.runnerExecution;
       if (!execution) {
         execution = createRunnerExecution(body);
@@ -156,6 +179,16 @@ try {
         return send(response, {
           message:
             'Existing runner execution identity does not match the request',
+        });
+      }
+      if (
+        state.rejectRecoveryConflictAcquire &&
+        execution.phase === 'recovery_conflicts'
+      ) {
+        response.statusCode = 400;
+        return send(response, {
+          message:
+            'Runner execution cannot transition from "recovery_conflicts" to "prepared"',
         });
       }
       if (
@@ -211,12 +244,42 @@ try {
         });
       }
       if (operation === 'checkpoint') {
-        if (body.recovery && state.recoveryCheckpointFailures > 0) {
+        if (body.phase === 'pushed' && state.pushedCheckpointFailures > 0) {
+          state.pushedCheckpointFailures -= 1;
+          response.statusCode = 503;
+          return send(response, {
+            message: 'Forced pushed checkpoint failure',
+          });
+        }
+        if (body.recovery && state.recoveryCheckpointSkip > 0) {
+          state.recoveryCheckpointSkip -= 1;
+        } else if (body.recovery && state.recoveryCheckpointFailures > 0) {
           state.recoveryCheckpointFailures -= 1;
           response.statusCode = 503;
           return send(response, {
             message: 'Forced recovery checkpoint failure',
           });
+        }
+        if (body.phase === 'pushed' && state.failLookupAfterPush) {
+          state.failLookupAfterPush = false;
+          state.mergeRequestLookupFailures = 3;
+        }
+        const requestedPhase = body.phase ?? execution.phase;
+        if (
+          !isValidRunnerExecutionPhaseTransition(
+            execution.phase,
+            requestedPhase
+          )
+        ) {
+          response.statusCode = 400;
+          return send(response, {
+            message: `Runner execution cannot transition from "${execution.phase}" to "${requestedPhase}"`,
+          });
+        }
+        if (requestedPhase !== execution.phase) {
+          state.runnerPhaseTransitions.push(
+            `${execution.phase}->${requestedPhase}`
+          );
         }
         for (const key of [
           'phase',
@@ -304,6 +367,7 @@ try {
         },
         progress: {
           status: state.projectProgressStatus,
+          metadata: state.projectProgressMetadata,
           resolution: state.projectProgressResolution,
           branch: state.projectProgressBranch,
           mergeRequestUrl: state.projectMergeRequestUrl,
@@ -728,6 +792,7 @@ try {
         title: 'Fix icon registry',
         source_branch: 'agentic/run-icons',
         target_branch: state.mergeRequestTargetBranch,
+        sha: state.mergeRequestSourceHeadSha,
         detailed_merge_status: state.mergeRequestDetailedStatus,
         rebase_in_progress: state.mergeRequestRebaseInProgress,
       });
@@ -858,6 +923,7 @@ try {
     await runWorkspaceCredentialsIntegration(context);
     await runWorkspaceRecoveryIntegration(context);
     await runPostMergeRequestContinuationIntegration(context);
+    await runTargetSyncRecoveryIntegration(context);
 
     console.log('Dedicated runner integration test passed.');
   } finally {
@@ -897,6 +963,24 @@ function createRunnerExecution(input: any) {
     creationDate: now,
     updateDate: now,
   };
+}
+
+function isValidRunnerExecutionPhaseTransition(
+  currentPhase: string,
+  nextPhase: string
+) {
+  if (currentPhase === nextPhase) return true;
+  const allowedTransitions: Record<string, string[]> = {
+    preparing: ['prepared'],
+    prepared: ['committed', 'recovery_conflicts', 'recovery_ready_to_push'],
+    recovery_conflicts: ['recovery_ready_to_push'],
+    recovery_ready_to_push: ['prepared', 'pushed'],
+    committed: ['pushed'],
+    pushed: ['prepared'],
+    completed: ['prepared'],
+    abandoned: ['prepared'],
+  };
+  return allowedTransitions[currentPhase]?.includes(nextPhase) ?? false;
 }
 
 async function commitForTest(targetDir: string, message: string) {

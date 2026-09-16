@@ -5,12 +5,10 @@ import {
 } from '../interface.js';
 import {
   commitAll,
-  fastForwardBranch,
   fetchBranch,
   getCurrentBranch,
   getHeadCommit,
   getRemoteBranchCommit,
-  getWorkingTreeStatus,
   isAncestor,
   isRebaseInProgress,
 } from './git.service.js';
@@ -61,19 +59,21 @@ export async function reconcileRunnerWorkspace(
     );
   }
 
-  const workingTreeStatus = await getWorkingTreeStatus(localPath);
   let head = await getHeadCommit(localPath);
+  const sourceRemoteBeforeFetch = await getRemoteBranchCommit(
+    state.branch,
+    localPath
+  );
   try {
-    await withGitCredentials(access, localPath, (env) =>
-      fetchBranch(repositoryUrl, state.branch, localPath, env)
-    );
-  } catch (error) {
-    if (projectState.progress.mergeRequestUrl) {
-      throw new Error(
-        'Unable to refresh the existing provider branch: ' +
-          toErrorMessage(error)
+    if (sourceRemoteBeforeFetch) {
+      await withGitCredentials(access, localPath, (env) =>
+        fetchBranch(repositoryUrl, state.branch, localPath, env)
       );
     }
+  } catch (error) {
+    throw new Error(
+      'Unable to refresh the provider source branch: ' + toErrorMessage(error)
+    );
   }
 
   const remoteCommit = await getRemoteBranchCommit(state.branch, localPath);
@@ -85,23 +85,17 @@ export async function reconcileRunnerWorkspace(
     );
   }
   if (remoteCommit && remoteCommit !== head.sha) {
-    if (await isAncestor(head.sha, remoteCommit, localPath)) {
-      if (workingTreeStatus) {
-        throw new RunnerWorkspaceReconciliationError(
-          'The remote branch advanced while the retained workspace has local changes.'
-        );
-      }
-      await fastForwardBranch(state.branch, localPath);
-      head = await getHeadCommit(localPath);
-    } else if (await isAncestor(remoteCommit, head.sha, localPath)) {
-      if (!hasVerifiedLocalHead) {
-        throw new RunnerWorkspaceReconciliationError(
-          'The retained workspace contains an unverified local commit.'
-        );
-      }
-    } else {
+    if (
+      !(await isAncestor(head.sha, remoteCommit, localPath)) &&
+      !(await isAncestor(remoteCommit, head.sha, localPath))
+    ) {
       throw new RunnerWorkspaceReconciliationError(
         'The retained workspace and remote provider branch have diverged.'
+      );
+    }
+    if (!hasVerifiedLocalHead) {
+      throw new RunnerWorkspaceReconciliationError(
+        'The retained workspace contains an unverified local commit.'
       );
     }
   }
