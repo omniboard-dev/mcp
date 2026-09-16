@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.1.38](https://github.com/omniboard-dev/mcp/compare/v0.1.37...v0.1.38) (2026-09-16)
+
+
+### Bug Fixes
+
+* **runner:** unify target synchronization and recovery ([a6d8908](https://github.com/omniboard-dev/mcp/commit/a6d89083c9f555d49cfdeb1752b7125ba6f2305f))
+
 ### [0.1.37](https://github.com/omniboard-dev/mcp/compare/v0.1.36...v0.1.37) (2026-08-28)
 
 
