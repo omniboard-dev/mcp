@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.1.39](https://github.com/omniboard-dev/mcp/compare/v0.1.38...v0.1.39) (2026-10-07)
+
+
+### Features
+
+* **runner:** deliver migrations through provider-confirmed merge ([164f505](https://github.com/omniboard-dev/mcp/commit/164f5052671c935447dd771c8b5ca954a02fb2bb))
+
 ### [0.1.38](https://github.com/omniboard-dev/mcp/compare/v0.1.37...v0.1.38) (2026-09-16)
 
 
