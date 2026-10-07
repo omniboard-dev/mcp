@@ -6,12 +6,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
-import { runAgenticRunIntegration } from './runner-workspace/agentic-run.integration.ts';
-import { runPostMergeRequestContinuationIntegration } from './runner-workspace/continuation.integration.ts';
 import { runWorkspaceCredentialsIntegration } from './runner-workspace/credentials.integration.ts';
-import { runWorkspacePreparationIntegration } from './runner-workspace/preparation.integration.ts';
-import { runWorkspaceRecoveryIntegration } from './runner-workspace/recovery.integration.ts';
-import { runTargetSyncRecoveryIntegration } from './runner-workspace/target-sync-recovery.integration.ts';
+import { runSimpleFlowIntegration } from './runner-workspace/simple-flow.integration.ts';
+import { runFreshRetryIntegration } from './runner-workspace/fresh-retry.integration.ts';
 
 const execFileAsync = promisify(cp.execFile);
 const execFile = (
@@ -57,6 +54,7 @@ const state: Record<string, any> = {
   bitbucketProviderSnapshotCount: 0,
   bitbucketPullRequestState: 'OPEN',
   mergeRequestCreateCount: 0,
+  mergeRequestIid: 3,
   mergeRequestLookupCount: 0,
   mergeRequestDetailedStatus: 'mergeable',
   mergeRequestRebaseInProgress: false,
@@ -105,6 +103,14 @@ function matchedProject(fulfillment: string, value: boolean | string) {
     fulfillment,
     repositoryUrl: state.projectRepositoryUrls[0],
     repositoryUrls: state.projectRepositoryUrls,
+    progress: state.persistProgress
+      ? {
+          status: state.projectProgressStatus,
+          resolution: state.projectProgressResolution,
+          repositoryUrl: state.projectProgressRepositoryUrl,
+          mergeRequestUrl: state.projectMergeRequestUrl,
+        }
+      : undefined,
   };
 }
 
@@ -149,194 +155,13 @@ try {
     const body = await readJsonBody(request);
     response.setHeader('Content-Type', 'application/json');
 
-    if (
-      request.method === 'POST' &&
-      url.pathname === '/mcp-cli/run-executions/acquire'
-    ) {
+    if (url.pathname.startsWith('/mcp-cli/run-executions')) {
       state.runnerAcquireCount += 1;
-      let execution = state.runnerExecution;
-      if (!execution) {
-        execution = createRunnerExecution(body);
-        state.runnerExecution = execution;
-      } else if (
-        execution.phase === 'preparing' &&
-        !execution.preparedHeadSha
-      ) {
-        Object.assign(execution, {
-          repositoryUrl: body.repositoryUrl,
-          sourceControlProvider: body.sourceControlProvider,
-          sourceControlRepositoryId: body.sourceControlRepositoryId,
-          branch: body.branch,
-          commitMessage: body.commitMessage ?? null,
-        });
-      } else if (
-        execution.sourceControlProvider !== body.sourceControlProvider ||
-        execution.sourceControlRepositoryId !==
-          body.sourceControlRepositoryId ||
-        execution.branch !== body.branch
-      ) {
-        response.statusCode = 409;
-        return send(response, {
-          message:
-            'Existing runner execution identity does not match the request',
-        });
-      }
-      if (
-        state.rejectRecoveryConflictAcquire &&
-        execution.phase === 'recovery_conflicts'
-      ) {
-        response.statusCode = 400;
-        return send(response, {
-          message:
-            'Runner execution cannot transition from "recovery_conflicts" to "prepared"',
-        });
-      }
-      if (
-        state.runnerLeaseToken &&
-        body.leaseToken !== state.runnerLeaseToken
-      ) {
-        response.statusCode = 409;
-        return send(response, {
-          message: 'Runner execution is leased by another MCP CLI process',
-        });
-      }
-      state.runnerLeaseToken = body.leaseToken ?? 'a'.repeat(64);
-      execution.leaseOwner = body.leaseOwner;
-      execution.leaseExpiresAt = new Date(Date.now() + 300_000).toISOString();
-      execution.heartbeatAt = new Date().toISOString();
+      response.statusCode = 500;
       return send(response, {
-        execution,
-        leaseToken: state.runnerLeaseToken,
+        message: 'Execution lifecycle is not available',
       });
     }
-
-    const runnerExecutionMatch =
-      /^\/mcp-cli\/run-executions\/([^/]+)\/(renew|checkpoint|reinitialize|complete|release)$/.exec(
-        url.pathname
-      );
-    if (runnerExecutionMatch && state.runnerExecution) {
-      const [, executionKey, operation] = runnerExecutionMatch;
-      const execution = state.runnerExecution;
-      if (executionKey !== execution.executionKey) {
-        response.statusCode = 404;
-        return send(response, { message: 'Runner execution not found' });
-      }
-      if (body.leaseToken !== state.runnerLeaseToken) {
-        response.statusCode = 409;
-        return send(response, { message: 'Runner execution lease is invalid' });
-      }
-      if (
-        operation !== 'renew' &&
-        operation !== 'release' &&
-        body.expectedStateVersion !== execution.stateVersion
-      ) {
-        response.statusCode = 409;
-        return send(response, {
-          message: 'Runner execution state version changed',
-        });
-      }
-      if (operation === 'renew') {
-        execution.heartbeatAt = new Date().toISOString();
-        execution.leaseExpiresAt = new Date(Date.now() + 300_000).toISOString();
-        return send(response, {
-          execution,
-          leaseToken: state.runnerLeaseToken,
-        });
-      }
-      if (operation === 'checkpoint') {
-        if (body.phase === 'pushed' && state.pushedCheckpointFailures > 0) {
-          state.pushedCheckpointFailures -= 1;
-          response.statusCode = 503;
-          return send(response, {
-            message: 'Forced pushed checkpoint failure',
-          });
-        }
-        if (body.recovery && state.recoveryCheckpointSkip > 0) {
-          state.recoveryCheckpointSkip -= 1;
-        } else if (body.recovery && state.recoveryCheckpointFailures > 0) {
-          state.recoveryCheckpointFailures -= 1;
-          response.statusCode = 503;
-          return send(response, {
-            message: 'Forced recovery checkpoint failure',
-          });
-        }
-        if (body.phase === 'pushed' && state.failLookupAfterPush) {
-          state.failLookupAfterPush = false;
-          state.mergeRequestLookupFailures = 3;
-        }
-        const requestedPhase = body.phase ?? execution.phase;
-        if (
-          !isValidRunnerExecutionPhaseTransition(
-            execution.phase,
-            requestedPhase
-          )
-        ) {
-          response.statusCode = 400;
-          return send(response, {
-            message: `Runner execution cannot transition from "${execution.phase}" to "${requestedPhase}"`,
-          });
-        }
-        if (requestedPhase !== execution.phase) {
-          state.runnerPhaseTransitions.push(
-            `${execution.phase}->${requestedPhase}`
-          );
-        }
-        for (const key of [
-          'phase',
-          'targetBranch',
-          'commitMessage',
-          'preparedHeadSha',
-          'commitSha',
-          'recovery',
-        ]) {
-          if (Object.prototype.hasOwnProperty.call(body, key)) {
-            execution[key] = body[key];
-          }
-        }
-        execution.stateVersion += 1;
-        return send(response, execution);
-      }
-      if (operation === 'reinitialize') {
-        Object.assign(execution, {
-          generation: execution.generation + 1,
-          phase: 'preparing',
-          targetBranch: null,
-          preparedHeadSha: null,
-          commitSha: null,
-          recovery: null,
-          stateVersion: execution.stateVersion + 1,
-        });
-        return send(response, execution);
-      }
-      if (operation === 'complete') {
-        execution.phase = body.phase;
-        execution.stateVersion += 1;
-      }
-      state.runnerLeaseToken = null;
-      execution.leaseOwner = null;
-      execution.leaseExpiresAt = null;
-      execution.heartbeatAt = null;
-      return send(response, execution);
-    }
-
-    if (
-      request.method === 'POST' &&
-      url.pathname === '/mcp-cli/run-executions/complete-by-identity'
-    ) {
-      const execution = state.runnerExecution;
-      state.runnerCompletionByIdentityPhases.push(body.phase);
-      if (!execution) {
-        return send(response, { completed: false, execution: null });
-      }
-      execution.phase = body.phase;
-      execution.stateVersion += 1;
-      state.runnerLeaseToken = null;
-      execution.leaseOwner = null;
-      execution.leaseExpiresAt = null;
-      execution.heartbeatAt = null;
-      return send(response, { completed: true, execution });
-    }
-
     if (request.method === 'GET' && url.pathname === '/mcp-cli/settings') {
       return send(response, {});
     }
@@ -366,6 +191,7 @@ try {
           repositoryUrls: state.projectRepositoryUrls,
         },
         progress: {
+          repositoryUrl: state.projectProgressRepositoryUrl ?? null,
           status: state.projectProgressStatus,
           metadata: state.projectProgressMetadata,
           resolution: state.projectProgressResolution,
@@ -465,6 +291,7 @@ try {
           repositoryUrls: state.projectRepositoryUrls,
         },
         progress: {
+          repositoryUrl: state.projectProgressRepositoryUrl ?? null,
           status: state.projectProgressStatus,
           resolution: state.projectProgressResolution,
           branch: state.projectProgressBranch,
@@ -615,6 +442,18 @@ try {
         []
       );
       progress.push(body);
+      if (state.persistProgress) {
+        for (const [field, key] of Object.entries({
+          status: 'projectProgressStatus',
+          resolution: 'projectProgressResolution',
+          repositoryUrl: 'projectProgressRepositoryUrl',
+          branch: 'projectProgressBranch',
+          mergeRequestUrl: 'projectMergeRequestUrl',
+          mergeRequestState: 'projectMergeRequestState',
+        })) {
+          if (Object.hasOwn(body, field)) state[key] = body[field];
+        }
+      }
       return send(response, { changed: true, row: body });
     }
 
@@ -776,7 +615,7 @@ try {
 
     if (
       request.method === 'GET' &&
-      /\/gitlab\/api\/v4\/projects\/.+\/merge_requests\/3$/.test(url.pathname)
+      /\/gitlab\/api\/v4\/projects\/.+\/merge_requests\/\d+$/.test(url.pathname)
     ) {
       if (state.mergeRequestLookupFailures > 0) {
         state.mergeRequestLookupFailures -= 1;
@@ -786,9 +625,9 @@ try {
       assert.equal(url.searchParams.get('include_rebase_in_progress'), 'true');
       return send(response, {
         id: 9,
-        iid: 3,
-        web_url: 'https://gitlab.example.com/group/project/-/merge_requests/3',
-        state: 'opened',
+        iid: state.mergeRequestIid,
+        web_url: `https://gitlab.example.com/group/project/-/merge_requests/${state.mergeRequestIid}`,
+        state: state.projectMergeRequestState ?? 'opened',
         title: 'Fix icon registry',
         source_branch: 'agentic/run-icons',
         target_branch: state.mergeRequestTargetBranch,
@@ -800,7 +639,22 @@ try {
 
     if (
       request.method === 'PUT' &&
-      /\/gitlab\/api\/v4\/projects\/.+\/merge_requests\/3\/rebase$/.test(
+      /\/gitlab\/api\/v4\/projects\/.+\/merge_requests\/\d+\/merge$/.test(
+        url.pathname
+      )
+    ) {
+      assert.deepEqual(body, { sha: state.mergeRequestSourceHeadSha });
+      state.mergeCalls = (state.mergeCalls ?? 0) + 1;
+      if (state.projectPipelineStatus !== 'success') {
+        response.statusCode = 405;
+        return send(response, { message: 'Pipeline must succeed' });
+      }
+      state.projectMergeRequestState = 'merged';
+      return send(response, { state: 'merged' });
+    }
+    if (
+      request.method === 'PUT' &&
+      /\/gitlab\/api\/v4\/projects\/.+\/merge_requests\/\d+\/rebase$/.test(
         url.pathname
       )
     ) {
@@ -821,9 +675,8 @@ try {
       return send(response, [
         {
           id: 9,
-          iid: 3,
-          web_url:
-            'https://gitlab.example.com/group/project/-/merge_requests/3',
+          iid: state.mergeRequestIid,
+          web_url: `https://gitlab.example.com/group/project/-/merge_requests/${state.mergeRequestIid}`,
           state: 'opened',
           title: 'Fix icon registry',
         },
@@ -851,17 +704,22 @@ try {
     ) {
       state.mergeRequestCreateCount += 1;
       state.mergeRequestPayload = body;
-      if (state.mergeRequestCreateCount > 1) {
+      const replacingClosed = ['closed', 'declined'].includes(
+        state.projectMergeRequestState
+      );
+      if (state.mergeRequestCreateCount > 1 && !replacingClosed) {
         response.statusCode = 409;
         return send(response, {
           message: 'Cannot Create: This merge request already exists',
         });
       }
+      if (replacingClosed) state.mergeRequestIid += 1;
+      state.projectMergeRequestState = 'opened';
       response.statusCode = 201;
       return send(response, {
         id: 9,
-        iid: 3,
-        web_url: 'https://gitlab.example.com/group/project/-/merge_requests/3',
+        iid: state.mergeRequestIid,
+        web_url: `https://gitlab.example.com/group/project/-/merge_requests/${state.mergeRequestIid}`,
         state: 'opened',
         title: body.title,
       });
@@ -918,12 +776,9 @@ try {
       withGitCredentials,
     };
 
-    await runAgenticRunIntegration(context);
-    Object.assign(context, await runWorkspacePreparationIntegration(context));
     await runWorkspaceCredentialsIntegration(context);
-    await runWorkspaceRecoveryIntegration(context);
-    await runPostMergeRequestContinuationIntegration(context);
-    await runTargetSyncRecoveryIntegration(context);
+    await runSimpleFlowIntegration(context);
+    await runFreshRetryIntegration(context);
 
     console.log('Dedicated runner integration test passed.');
   } finally {

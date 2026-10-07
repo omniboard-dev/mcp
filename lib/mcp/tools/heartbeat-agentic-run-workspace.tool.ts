@@ -7,7 +7,7 @@ import { McpCliToolDefinition } from '../shared.js';
 export const heartbeatAgenticRunWorkspaceTool: McpCliToolDefinition = {
   name: 'omniboard_runner_heartbeat_agentic_run_workspace',
   description:
-    'Record meaningful worker activity for a prepared runner workspace. Call at least every 10 minutes during long edits or validations; this does not extend the overall 60-minute work budget.',
+    'Compatibility no-op. Workspaces have no heartbeat requirement or time budget. Continue working and finalize when ready.',
   inputSchema: {
     runKey: z.string().min(1),
     projectName: z.string().min(1),

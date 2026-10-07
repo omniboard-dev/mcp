@@ -243,6 +243,7 @@ export const runnerWorkspacePrepareOutputSchema = z
     projectState: projectStateOutputSchema,
     continuation: continuationOutputSchema,
     workspace: runnerWorkspaceOutputSchema.optional(),
+    workspaceCreated: z.boolean().optional(),
     prompt: z.string().nullable(),
     instructions: z.array(z.string()),
     progressReport: progressReportOutputSchema.optional(),
@@ -252,6 +253,7 @@ export const runnerWorkspacePrepareOutputSchema = z
 export const runnerWorkspaceFinalizeOutputSchema = z
   .object({
     completed: z.boolean(),
+    published: z.boolean().optional(),
     workspace: runnerWorkspaceOutputSchema,
     commitSha: z.string().optional(),
     mergeRequest: unknownObjectSchema.optional(),
@@ -342,7 +344,11 @@ export const batchPreparationOutputSchema = z
         }),
         preparation: runnerWorkspacePrepareOutputSchema.optional(),
         reason: z
-          .enum(['preparation_in_progress', 'execution_lease_active'])
+          .enum([
+            'preparation_in_progress',
+            'waiting_for_ci',
+            'waiting_for_review',
+          ])
           .optional(),
         error: z.string().optional(),
       })

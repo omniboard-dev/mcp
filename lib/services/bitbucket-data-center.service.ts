@@ -570,3 +570,35 @@ async function readError(response: Response) {
     return response.statusText;
   }
 }
+
+export async function mergeBitbucketPullRequest(
+  access: BitbucketDataCenterRepositoryAccess,
+  repositoryId: string,
+  pullRequestId: number,
+  version: number
+) {
+  const base = resolveBitbucketApiBaseUrl(access.apiBaseUrl);
+  const response = await fetchWithTimeout(
+    `${repositoryEndpoint(
+      base,
+      parseRepositoryId(repositoryId)
+    )}/pull-requests/${pullRequestId}/merge`,
+    {
+      method: 'POST',
+      headers: {
+        ...bitbucketHeaders(access),
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ version }),
+    }
+  );
+  if (!response.ok)
+    return {
+      merged: false,
+      reason: `Bitbucket merge returned ${response.status}: ${await readError(
+        response
+      )}`,
+    };
+  const result = (await response.json()) as BitbucketPullRequestResponse;
+  return { merged: result.state?.toLowerCase() === 'merged' };
+}

@@ -9,7 +9,7 @@ export function resolveRunnerGitValues(
       normalizeNonEmptyString(options.branch) ??
       normalizeNonEmptyString(run.branchName) ??
       extractPromptGitValue(run.prompt, 'branchName') ??
-      `agentic/${slug(run.runKey)}-${Date.now().toString(36)}`,
+      `agentic/${slug(run.runKey)}`,
     commitMessage:
       normalizeNonEmptyString(run.commitMessage) ??
       extractPromptGitValue(run.prompt, 'commitMessage') ??

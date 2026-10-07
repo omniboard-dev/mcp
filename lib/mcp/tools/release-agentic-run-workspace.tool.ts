@@ -7,7 +7,7 @@ import { McpCliToolDefinition } from '../shared.js';
 export const releaseAgenticRunWorkspaceTool: McpCliToolDefinition = {
   name: 'omniboard_runner_release_agentic_run_workspace',
   description:
-    'Release a prepared workspace lease owned by this MCP CLI process when the caller will not finalize that workspace. Renewal stops immediately and the workspace node_modules directory is removed, while the DB execution and Git checkout remain resumable. The operation is idempotent and never releases a lease owned by another MCP CLI process.',
+    "Optional compatibility operation that forgets this process's cached checkout context. It preserves the checkout, edits and dependencies. No release step is required.",
   inputSchema: {
     runKey: z.string().min(1),
     projectName: z.string().min(1),

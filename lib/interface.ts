@@ -592,13 +592,16 @@ export interface RunnerWorkspacePrepareResult {
   projectState: AgenticRunProjectState;
   continuation: AgenticRunContinuationDecision;
   workspace?: RunnerWorkspaceState;
+  workspaceCreated?: boolean;
   prompt: string | null;
   instructions: string[];
   progressReport?: AgenticRunProgressReportResult;
 }
 
 export interface RunnerWorkspaceFinalizeResult {
+  /** Completion of this publication call, not of the migration. */
   completed: boolean;
+  published?: boolean;
   workspace: RunnerWorkspaceState;
   commitSha?: string;
   mergeRequest?: {

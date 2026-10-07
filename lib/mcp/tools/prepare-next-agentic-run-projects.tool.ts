@@ -8,13 +8,16 @@ import { McpCliToolDefinition } from '../shared.js';
 export const prepareNextAgenticRunProjectsTool: McpCliToolDefinition = {
   name: 'omniboard_runner_prepare_next_agentic_run_projects',
   description:
-    'Dedicated runner execution: order candidates by Analyzer source LOC smallest-first, using source file count and relevant source-extension metrics as deterministic tie-breakers, then refresh and prepare distinct atomically leased workspaces until the requested limit is reached. The connected agent should pass relevantSourceExtensions after interpreting the run prompt; when omitted, MCP CLI derives extensions from prompt/check text and matched source paths. Older project-size metadata without a source breakdown falls back to aggregate metrics. Projects without size metadata sort after measured projects. Defaults to pending, pending-retry, blocked, and failed projects. Candidates already being prepared, holding an active execution lease in this MCP CLI process, or rejected because another MCP CLI process holds the API lease are reported as waiting while scanning continues. Finalize or explicitly release every returned workspace. Use the agentic-state side-effect-free list tool for discovery; use this tool when ready to acquire and work on the next projects, then list again only when an updated overview is needed.',
+    'Continue delivering migrations through merge. By default, fill the batch from pending projects first, then started/published work, then failed/blocked/retry work; order by source size within each group. Skip work that is only waiting on CI or approval and continue scanning. Explicit statuses override the default groups and use source-size ordering. Resume and verify started work before finalizing; follow published MRs through CI repair and provider-confirmed merge. Existing work remains selectable after analyzer results change.',
   inputSchema: {
     runKey: z.string().min(1),
     statuses: z
       .array(z.enum(AGENTIC_RUN_PROGRESS_STATUS_VALUES))
       .min(1)
-      .optional(),
+      .optional()
+      .describe(
+        'Omit for pending-first, started/published-second, failed/blocked/retry-last fallback. Supply statuses to override the default, for example ["pending"] for new work only or ["failed", "blocked"] for repairs only.'
+      ),
     limit: z.number().int().positive().max(10).optional(),
     relevantSourceExtensions: z
       .array(z.string().min(1))

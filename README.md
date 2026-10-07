@@ -16,6 +16,16 @@ the transport and wire format rather than another Omniboard component.
 One agentic run consists of one prompt and its tracked progress. Tools identify a
 run with its `runKey`.
 
+## Delivery goal
+
+The MCP server sends its prime directive to the coding client during initialization:
+deliver the requested migration and reach provider-confirmed merge. Use that goal
+to resolve ambiguous next steps within the user's scope and constraints.
+Publication alone is not completion. Continue through verification, CI repair and
+merge; recover disposable runner state and closed MRs as needed. Duplicate effort
+is an accepted efficiency tradeoff. When external requirements prevent progress,
+report the concrete blocker and continue other actionable projects.
+
 ## Environment
 
 `OMNIBOARD_API_KEY_MCP_CLI` is required and should be passed through the coding
@@ -197,23 +207,16 @@ project. On first preparation, the server creates:
 The generated `.gitignore` excludes `workspaces/`. If the file already
 exists, its content is preserved and only the missing runtime entry is added.
 
-Each checkout is created under `workspaces/` at a deterministic path derived
-from the DB execution key and generation.
+Each migration uses a stable checkout under `workspaces/`. Compatible checkouts
+retain local edits and dependencies across restart. Runner checkouts are disposable:
+missing or incompatible metadata causes a fresh clone from the existing source
+branch, or from the latest target when that branch no longer exists. Older
+checkouts are not required for recovery.
 
-Execution state is handled as follows:
-
-- The Omniboard API stores prepared and committed SHAs, branch and repository
-  identity, recovery metadata, lifecycle phase, and optimistic state version.
-- MCP CLI does not write accompanying JSON state.
-- Repository credentials and local filesystem paths are never stored in
-  execution state.
-- The execution has a short renewable lease. Its token exists only in MCP CLI
-  process memory; the API stores only its hash.
-- DB execution state is authoritative, and runner checkouts are disposable
-  local working copies.
-- If a checkout disappears or no longer matches its DB checkpoint, the next
-  preparation increments the generation and creates a fresh checkout.
-- Uncheckpointed local state is never used as recovery state.
+Git and the provider supply current facts. Progress is reporting, not permission
+to work. There are no execution API calls, renewable leases, heartbeat deadlines,
+or work budgets. Small metadata under `.git/omniboard-runner.json` retains the
+source SHA and any preserved stash so interrupted Git operations can resume.
 
 ### Git commit identity
 
@@ -292,7 +295,7 @@ when the same automation identity is shared by multiple workflows.
    only that run and project against its Git provider before deciding whether
    work should continue. For batch selection, call
    `omniboard_runner_prepare_next_agentic_run_projects` instead; it scans and
-   prepares leased workspaces until its requested limit is reached.
+   prepares migration workspaces until its requested limit is reached.
 4. Give the returned prompt, result context, and workspace path to the connected
    coding agent.
 5. Run the relevant tests, lint, or build commands inside that workspace.
@@ -378,219 +381,77 @@ Use the tools in this order:
    deciding whether work can continue.
 3. List again only when an updated stored overview is needed after preparation.
 
-Do not prepare every project merely to refresh discovery data; preparation can
-acquire a lease and create or resume an actionable workspace.
-
 #### `omniboard_runner_prepare_next_agentic_run_projects`
 
-Scans projects for one run and prepares workspaces until the requested `limit`
-is reached.
+Prepare up to `limit` actionable migrations (default one, maximum ten). For
+"continue" or "do the next 10", fill the batch in this order:
 
-Batch controls are:
+1. Pending projects, including those without stored progress.
+2. Started or published work: in_progress, implemented, verified, committed,
+   pushed, mr_created.
+3. Recovery work: pending_retry, failed, blocked, needs_input, and unmerged done
+   or dismissed work.
 
-- `statuses`: defaults to `pending`, `pending_retry`, `blocked`, and `failed`, and accepts any supported
-  canonical progress statuses.
-- `limit`: defaults to one and is bounded at ten.
-- `relevantSourceExtensions`: lets the coding agent identify likely edited
-  source types after interpreting the run prompt. Relevant source lines and file
-  counts provide deterministic tie-breakers after total source size.
+Within each group, order by Analyzer source size. Failed preparations, merged
+changes, and work only waiting for CI or approval do not consume the actionable
+limit; keep scanning the remaining groups. Waiting is reported only when the
+checkout is clean and its synchronized HEAD matches the published source commit.
+Local edits, unpublished rebases and actionable failures remain work to finish.
+Already-merged progress is excluded.
 
-Candidates are ordered smallest-first:
-
-1. Analyzer-reported source line count is the primary ranking metric.
-2. Source file count provides the first deterministic tie-breaker.
-3. Lines and file counts for explicitly supplied or inferred relevant source
-   extensions provide additional tie-breakers.
-4. Project name is the final deterministic tie-breaker.
-5. Older `projectSize` metadata without a source breakdown falls back to aggregate
-   project metrics.
-6. Projects without `projectSize` metadata remain eligible but follow measured
-   projects.
-
-Each candidate is refreshed through the normal preparation path and classified:
-
-- Actionable candidates acquire the atomic per-project DB execution lease and
-  return a prepared workspace.
-- Candidates already being prepared or holding an active lease in the same MCP CLI
-  process are reported as waiting.
-- Other waiting, stopped, and failed candidates remain in the response while
-  scanning continues for actionable work.
-
-The response includes aggregate counts, source selection, and per-project
-results with selected extensions, size ranking, prompts, and workspace paths.
-
-The operation does not dispatch coding agents or finalize work. Every returned
-workspace must be edited, verified, and finalized individually, or explicitly
-released when the caller will not finish it.
+Explicit `statuses` replace the default groups and use source-size ordering:
+`["pending"]` requests only new work; `["failed", "blocked"]` requests repairs.
+Existing work remains selectable after its analyzer result changes. A prepared
+batch is not a completed migration batch: finish each selected project through
+merge, and report remaining waits or blockers.
 
 #### `omniboard_runner_prepare_agentic_run_workspace`
 
-Preparation follows this sequence:
+1. Read the run, repository access, MR and CI diagnostics.
+2. Reuse its checkout or clone the source branch if none exists.
+3. Fetch the current source and target (normally main), preserve edits, and rebase.
+4. Return the workspace, prompt and any conflicts for the agent to resolve.
 
-1. Resolve the matching project and run.
-2. Refresh merge request and pipeline state.
-3. Apply the shared continuation logic to canonical progress.
-4. When work can continue, verify repository access and acquire the DB execution
-   lease.
-5. Reuse a validated checkout or recreate a missing or inconsistent checkout at
-   a new generation, then fetch the latest source and configured target branches.
-6. Rebase the prepared source branch onto the fetched target before returning
-   actionable work. Tracked, staged, unstaged, and untracked changes in a
-   retained checkout are preserved through this synchronization.
-7. Report `in_progress`, or `blocked` when target synchronization or recovery has
-   unresolved conflicts.
-8. Return the prompt, result context, provider diagnostics, workspace path, and
-   agent instructions.
+Only an already merged change stops; an actual provider rebase in progress waits.
+Closed or declined MRs and dismissed progress remain actionable. Recover their
+source branch and rebase on the latest target, or start fresh if the branch is
+gone. A conflicting rebase returns the same workspace.
 
-Continuation outcomes include:
-
-- Actionable work returns a prepared workspace.
-- Merged or otherwise non-actionable work returns without a workspace.
-- Failed application pipelines remain actionable.
-- Infrastructure-only pipeline failures remain non-actionable for code changes.
-- When provider metadata and credentials permit a retry, MCP CLI requests one and
-  returns `wait` until refreshed provider status becomes actionable.
-
-Branch-name precedence is:
-
-1. Explicit tool input.
-2. Agentic run definition.
-3. Labeled value in the prompt.
-4. Generated agentic branch name.
-
-Commit-message precedence is:
-
-1. Agentic run definition.
-2. Labeled value in the prompt.
-3. Run-key-based default.
-
-Both resolved values are stored in the DB execution checkpoint.
-
-An optional repository URL is accepted only when it identifies a registered
-repository URL for the matched Omniboard project.
-
-Every preparation fetches the latest configured target branch (normally `main`)
-before returning a workspace. If the source branch must be rebased, MCP CLI
-checkpoints the synchronization state and prepared HEAD before continuing.
-Rebased existing source branches are later published with
-`force-with-lease` against the source SHA observed during preparation. If the
-target application or restoration of retained dirty work conflicts, preparation
-returns `blocked` with the workspace and checkpointed recovery state; it never
-resets or silently discards those changes.
-
-Synchronization checkpoints the source SHA, target SHA, and preserved stash
-before changing the branch. A failed checkpoint leaves the existing work
-recoverable in the same checkout. Synchronization metadata is retained until
-the push is confirmed, so a failed push can be retried without losing its lease.
-Repeated preparation and synchronization finalization refresh the target again;
-an active conflict must be resolved before rebasing onto any newer target.
-If restoring staged edits conflicts with upstream changes, the runner returns
-ordinary file conflicts for the agent to resolve and stage before finalization.
-Changes to the merge request's branches or concurrent changes to its source
-branch stop publication while preserving the checkout and migration edits.
-
-New migrations and stale or blocked workspaces use the same local synchronization
-flow whenever the continuation decision allows work:
-
-1. Refresh project/provider state, acquire the execution lease, and create or
-   resume the dedicated source-branch checkout.
-2. Fetch the configured target (normally `main`), preserve local edits, and rebase
-   if needed. An already-current branch needs no Git history change. MCP CLI does
-   not request provider-native rebases; it waits if one is already in progress.
-3. Return the run prompt and workspace. The coding agent completes the migration,
-   resolves and stages any reported conflicts, and runs relevant checks.
-4. Finalization continues any pending rebase and refreshes the target again. New
-   conflicts return `completed: false` and the same checkout for another resolution
-   pass. A moving target never triggers a destructive retry-limit reset.
-5. Commit the migration and push. Rewritten existing branches use
-   `force-with-lease` against the recorded source SHA. Create or reuse the change
-   request; retries after a checkpointed push resume provider publication.
-6. Continue refreshing provider state: fix actionable code, review, or mergeability
-   failures; wait for pending CI/review; stop successfully when the merge is
-   observed. Successful workspace finalization means publication completed, not
-   that the migration has merged.
-
-Recovery safeguards are:
-
-- Concurrent source changes or changed request branches stop publication while
-  preserving the checkout and migration edits for reconciliation.
-- Recovery phase, attempt, source and target SHAs, and conflict files are
-  checkpointed after every recoverable transition. Stored legacy rebase
-  checkpoints resume through this same flow.
-- A local Git receipt records restored stashes until they are dropped, preventing
-  a failed API checkpoint from causing duplicate restoration on retry.
-- Local conflict recovery stays actionable even when an existing remote change
-  request is still mergeable.
-- Another MCP CLI process can continue from the checkpoint after the previous lease
-  expires.
-
-
-#### `omniboard_runner_release_agentic_run_workspace`
-
-Use this tool for every prepared workspace that will not be finalized.
-
-Release behavior is:
-
-- A lease owned by the current MCP CLI process is released.
-- The renewal timer stops immediately.
-- The workspace root `node_modules` is removed to reclaim dependency storage.
-- The execution record and Git checkout remain available for a later runner.
-- Repeated calls, or calls from a process that does not own the lease, return
-  `released: false` without changing another process's lease.
-- Agentic-run progress is unchanged.
-- The execution is not marked completed or abandoned.
+An existing MR supplies the source branch; otherwise use retained progress,
+explicit input, the run/prompt, or a stable run-key default. The commit message
+comes from the run/prompt or run key. Continue using the repository already
+recorded for the migration even when the project lists several repositories.
+Only repositories registered for the selected project may be used.
 
 #### `omniboard_runner_finalize_agentic_run_workspace`
 
-Before normal finalization or recovery, MCP CLI:
+After resolving conflicts and running relevant checks, finalize the checkout.
+Finalization refreshes source and target, continues pending rebases, commits local
+changes and pushes the same branch. Rewritten history uses Git's expected-source
+SHA check to avoid overwriting a push that arrived while publication was running.
+It reuses an open MR or creates a replacement when the previous MR is closed or
+declined. A conflict returns `completed: false` with files to resolve. If the
+checkout had to be recreated, finalization returns `completed: false` so the agent
+can reapply the prompt and run checks before publishing. Successful publication
+returns `completed: true, published: true`.
 
-1. Refreshes provider state and applies the same continuation decision used by
-   preparation and local execution.
-2. Stops before changing Git or provider state when the decision is `wait` or
-   `stop`.
-3. Verifies that the refreshed branch and repository still match the leased DB
-   execution and deterministic checkout generation.
+Publication does not mean the migration merged. The agent must inspect the MR
+pipeline, use failure logs to repair it, rerun checks, publish again, and merge
+when the provider's checks permit it. Call `omniboard_runner_merge_agentic_run` to
+request the merge; it returns `merged: true` only after provider confirmation.
 
-After the coding agent applies and verifies a normal change, MCP CLI:
+#### `omniboard_runner_merge_agentic_run`
 
-1. Synchronizes unpublished work with the latest target and continues any pending rebase.
-2. Creates or resumes the runner commit.
-3. Retrieves fresh repository access and pushes the prepared branch.
-4. Creates or reuses the provider change request.
-5. Reports `committed`, `pushed`, and applicable change-request milestones.
-6. Releases the execution lease and removes the workspace root `node_modules`.
+Merge the published migration through GitLab or Bitbucket. The provider enforces
+its merge requirements and returns its reason when merging is unavailable. The
+runner reports done + merged only when the provider confirms it; stale progress
+labels do not prevent the attempt. Already-merged requests return successfully.
 
-Failed finalization also releases the lease and removes `node_modules` after
-reporting the failure. Graceful MCP shutdown and watchdog expiry perform the
-same dependency cleanup for every workspace whose lease stops.
+#### Compatibility heartbeat and release tools
 
-Callers must inspect `completed`:
-
-- `completed: true`: normal finalization or recovery finished successfully.
-- `completed: false`: recovery requires another action or remains blocked. The
-  response provides applicable errors, instructions, and conflict files. MCP CLI
-  does not push when its recovery safety checks fail.
-
-A successful recovery also:
-
-- Reports `pushed`.
-- Clears the DB recovery checkpoint.
-- Releases the execution lease.
-- Leaves further provider-state refreshes to the continuation loop.
-
-The prepared commit message is used by default. The caller may override it and
-may also supply the merge request title and description. Commit and rebase committer identity use the MCP startup project identity,
-applied to the checkout before Git can create commits.
-
-A successful push is not terminal because review, pipeline, or rebase recovery
-may still continue. Execution lifecycle outcomes are:
-
-- `completed`: refreshed continuation state says the change is finished.
-- `abandoned`: the change was dismissed.
-- The API cleanup cron removes completed rows after 30 days and abandoned rows
-  after 7 days in bounded batches.
-- Foreign-key cascades remove rows when their owning run, project, group, or
-  organization is removed.
+Heartbeat is a no-op. Release only forgets in-process context. Neither is required;
+neither deletes the checkout or dependencies. Restarting preparation resumes the
+same checkout using Git and the retained stash/source references.
 
 #### `omniboard_runner_report_agentic_run_progress`
 

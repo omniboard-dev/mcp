@@ -87,11 +87,11 @@ const unfulfilledRetryProject = project(
   'unfulfilled'
 );
 const nonTargetedRetryProject = {
-  ...project('a-project-non-targeted', 'pending_retry'),
+  ...project('a-project-non-targeted', 'done', { resolution: 'dismissed' }),
   targetedByRun: false,
 };
 const unfulfilledRetryBatch = await prepareNextRunnerProjects(
-  { runKey: run.runKey, limit: 1 },
+  { runKey: run.runKey, statuses: ['pending_retry', 'done'], limit: 1 },
   {
     listProjects: async (options) => {
       retryDiscoveryRequests.push(options);
@@ -152,16 +152,11 @@ const unfulfilledRetryBatch = await prepareNextRunnerProjects(
   }
 );
 assert.equal(retryDiscoveryRequests.length, 1);
-assert.deepEqual(retryDiscoveryRequests[0].statuses, [
-  'pending',
-  'pending_retry',
-  'blocked',
-  'failed',
-]);
-assert.equal(unfulfilledRetryBatch.candidatesTotal, 1);
+assert.deepEqual(retryDiscoveryRequests[0].statuses, ['pending_retry', 'done']);
+assert.equal(unfulfilledRetryBatch.candidatesTotal, 2);
 assert.equal(
   unfulfilledRetryBatch.results[0].projectName,
-  unfulfilledRetryProject.name
+  nonTargetedRetryProject.name
 );
 assert.equal(unfulfilledRetryBatch.results[0].outcome, 'stopped');
 
@@ -256,7 +251,7 @@ assert.equal(
 );
 
 const pendingWithoutStoredProgressBatch = await prepareNextRunnerProjects(
-  { runKey: run.runKey, statuses: ['pending'], limit: 1 },
+  { runKey: run.runKey, limit: 1 },
   {
     listProjects: async () => pendingWithoutStoredProgressList,
     isWorkspacePreparationInProgress: () => false,
@@ -273,6 +268,226 @@ assert.equal(
   pendingWithoutStoredProgressBatch.results[0].initialStatus,
   'pending'
 );
+assert(pendingWithoutStoredProgressBatch.requestedStatuses.includes('pending'));
+assert(
+  pendingWithoutStoredProgressBatch.requestedStatuses.includes('in_progress')
+);
+assert(pendingWithoutStoredProgressBatch.requestedStatuses.includes('failed'));
+assert(
+  pendingWithoutStoredProgressBatch.requestedStatuses.includes('mr_created')
+);
+
+const statusSelectionProjects = [
+  pendingWithoutStoredProgress,
+  {
+    ...projectWithSize('stored-pending', 1000, { ts: 1000 }),
+    progress: { status: 'pending' },
+  },
+  project('ongoing', 'in_progress'),
+  project('retry', 'pending_retry'),
+  projectWithSize('failed', 1, { ts: 1 }),
+  project('blocked', 'blocked'),
+  project('published', 'mr_created'),
+  project('dismissed', 'done', { resolution: 'dismissed' }),
+  project('merged', 'done', { resolution: 'merged' }),
+];
+const statusSelectionDependencies = {
+  ...batchDependencies(pendingWithoutStoredProgressList),
+  listProjects: async (options) =>
+    createAgenticRunProjectList(
+      {
+        check: pendingWithoutStoredProgressList.check,
+        run,
+        runs: [run],
+        projects: statusSelectionProjects,
+        total: statusSelectionProjects.length,
+        totalsByFulfillment: fulfillmentTotals({
+          fulfilled: statusSelectionProjects.length,
+        }),
+      },
+      { statuses: options.statuses }
+    ),
+};
+const defaultStatusBatch = await prepareNextRunnerProjects(
+  { runKey: run.runKey, limit: 10 },
+  statusSelectionDependencies
+);
+assert.deepEqual(
+  defaultStatusBatch.results.map(({ projectName }) => projectName),
+  [
+    'stored-pending',
+    pendingWithoutStoredProgress.name,
+    'ongoing',
+    'published',
+    'failed',
+    'blocked',
+    'dismissed',
+    'retry',
+  ]
+);
+const includeOngoingBatch = await prepareNextRunnerProjects(
+  { runKey: run.runKey, limit: 10, statuses: ['pending', 'in_progress'] },
+  statusSelectionDependencies
+);
+assert.deepEqual(
+  includeOngoingBatch.results.map(({ projectName }) => projectName).sort(),
+  [pendingWithoutStoredProgress.name, 'stored-pending', 'ongoing'].sort()
+);
+
+const pendingOnlyBatch = await prepareNextRunnerProjects(
+  { runKey: run.runKey, limit: 10, statuses: ['pending'] },
+  statusSelectionDependencies
+);
+assert.deepEqual(
+  pendingOnlyBatch.results.map(({ projectName }) => projectName),
+  ['stored-pending', pendingWithoutStoredProgress.name]
+);
+const repairsOnlyBatch = await prepareNextRunnerProjects(
+  { runKey: run.runKey, limit: 10, statuses: ['failed', 'blocked'] },
+  statusSelectionDependencies
+);
+assert.deepEqual(
+  repairsOnlyBatch.results.map(({ projectName }) => projectName),
+  ['failed', 'blocked']
+);
+const pendingFirstBatch = await prepareNextRunnerProjects(
+  { runKey: run.runKey, limit: 1 },
+  statusSelectionDependencies
+);
+assert.equal(pendingFirstBatch.results[0].projectName, 'stored-pending');
+assert.equal(pendingFirstBatch.hasMore, true);
+const startedFallback = await prepareNextRunnerProjects(
+  { runKey: run.runKey, limit: 1 },
+  {
+    ...statusSelectionDependencies,
+    listProjects: async (options) => {
+      const response = await statusSelectionDependencies.listProjects(options);
+      return {
+        ...response,
+        projects: response.projects.filter(
+          (project) =>
+            project.progress?.status && project.progress.status !== 'pending'
+        ),
+      };
+    },
+  }
+);
+assert.equal(startedFallback.results[0].projectName, 'ongoing');
+const repairFallback = await prepareNextRunnerProjects(
+  { runKey: run.runKey, limit: 1 },
+  {
+    ...statusSelectionDependencies,
+    listProjects: async (options) => {
+      const response = await statusSelectionDependencies.listProjects(options);
+      return {
+        ...response,
+        projects: response.projects.filter((project) =>
+          ['failed', 'blocked'].includes(project.progress?.status)
+        ),
+      };
+    },
+  }
+);
+assert.equal(repairFallback.results[0].projectName, 'failed');
+
+for (const reason of ['waiting_for_ci', 'waiting_for_review']) {
+  const waitingBatch = await prepareNextRunnerProjects(
+    { runKey: run.runKey, limit: 1 },
+    {
+      ...statusSelectionDependencies,
+      workingTreeStatus: async () => '',
+      prepareWorkspace: async ({ projectName }) => {
+        if (projectName === 'stored-pending')
+          throw new Error('Repository unavailable');
+        if (projectName === pendingWithoutStoredProgress.name)
+          return preparation(projectName, 'stop');
+        const result = preparation(projectName, 'continue', true);
+        if (['ongoing', 'published'].includes(projectName)) {
+          Object.assign(result.projectState.progress, {
+            status: 'mr_created',
+            mergeRequestUrl:
+              'https://gitlab.example.com/group/project/-/merge_requests/3',
+            mergeRequestState: 'opened',
+            pipelineStatus: reason === 'waiting_for_ci' ? 'running' : 'success',
+            mergeRequestDetailedStatus:
+              reason === 'waiting_for_review'
+                ? 'not_approved'
+                : 'ci_still_running',
+          });
+          Object.assign(result.workspace, {
+            preparedHeadSha: 'published-sha',
+            recovery: {
+              phase: 'ready_to_push',
+              sourceHeadSha: 'published-sha',
+            },
+          });
+        }
+        return result;
+      },
+    }
+  );
+  assert.deepEqual(
+    waitingBatch.results.map(({ projectName, outcome }) => [
+      projectName,
+      outcome,
+    ]),
+    [
+      ['stored-pending', 'failed'],
+      [pendingWithoutStoredProgress.name, 'stopped'],
+      ['ongoing', 'waiting'],
+      ['published', 'waiting'],
+      ['failed', 'prepared'],
+    ]
+  );
+  assert.equal(waitingBatch.results[2].reason, reason);
+  assert.equal(waitingBatch.summary.prepared, 1);
+  assert.equal(waitingBatch.summary.waiting, 2);
+}
+
+for (const condition of [
+  'dirty',
+  'rebased',
+  'ci_failed',
+  'review_changes',
+  'mergeable',
+]) {
+  const actionable = await prepareNextRunnerProjects(
+    { runKey: run.runKey, limit: 1, statuses: ['mr_created'] },
+    {
+      ...statusSelectionDependencies,
+      workingTreeStatus: async () =>
+        condition === 'dirty' ? ' M src/app.ts' : '',
+      prepareWorkspace: async ({ projectName }) => {
+        const result = preparation(projectName, 'continue', true);
+        Object.assign(result.projectState.progress, {
+          status: 'mr_created',
+          mergeRequestUrl:
+            'https://gitlab.example.com/group/project/-/merge_requests/3',
+          mergeRequestState: 'opened',
+          pipelineStatus:
+            condition === 'ci_failed'
+              ? 'failed'
+              : condition === 'mergeable'
+              ? 'success'
+              : 'running',
+          mergeRequestDetailedStatus:
+            condition === 'review_changes'
+              ? 'requested_changes'
+              : condition === 'ci_failed'
+              ? 'not_approved'
+              : 'mergeable',
+        });
+        Object.assign(result.workspace, {
+          preparedHeadSha:
+            condition === 'rebased' ? 'new-sha' : 'published-sha',
+          recovery: { phase: 'ready_to_push', sourceHeadSha: 'published-sha' },
+        });
+        return result;
+      },
+    }
+  );
+  assert.equal(actionable.results[0].outcome, 'prepared', condition);
+}
 
 const batchCandidates = createAgenticRunProjectList(
   {
@@ -759,44 +974,8 @@ assert.deepEqual(
     outcome,
     reason ?? null,
   ]),
-  [
-    ['project-a', 'waiting', 'execution_lease_active'],
-    ['project-b', 'waiting', 'execution_lease_active'],
-    ['project-c', 'prepared', null],
-  ]
+  [['project-a', 'prepared', null]]
 );
-
-const crossProcessLeaseBatch = await prepareNextRunnerProjects(
-  { runKey: run.runKey, statuses: ['failed', 'blocked'], limit: 1 },
-  {
-    ...batchDependencies(batchCandidates),
-    prepareWorkspace: async ({ projectName }) => {
-      if (projectName === 'project-a') {
-        throw new RunnerExecutionLeaseConflictError(
-          'Runner execution is leased by another MCP CLI process'
-        );
-      }
-      return preparation(projectName, 'continue', true);
-    },
-  }
-);
-assert.deepEqual(
-  crossProcessLeaseBatch.results.map(({ projectName, outcome, reason }) => [
-    projectName,
-    outcome,
-    reason ?? null,
-  ]),
-  [
-    ['project-a', 'waiting', 'execution_lease_active'],
-    ['project-b', 'prepared', null],
-  ]
-);
-assert.deepEqual(crossProcessLeaseBatch.summary, {
-  prepared: 1,
-  waiting: 1,
-  stopped: 0,
-  failed: 0,
-});
 
 const apiResponse = {
   check: {
@@ -919,6 +1098,18 @@ const client = new Client({ name: 'runner-tools-test', version: '1.0.0' });
 
 try {
   await client.connect(transport);
+  const instructions = client.getInstructions();
+  assert(instructions);
+  assert.match(instructions, /Prime directive.*provider-confirmed merge/);
+  assert.match(instructions, /Publication alone is not completion/);
+  assert.match(
+    instructions,
+    /pending work, then started\/published work, then failed\/blocked\/retry work/
+  );
+  assert.match(
+    instructions,
+    /Duplicate effort is an accepted efficiency tradeoff/
+  );
   const { tools } = await client.listTools();
   const names = tools.map((tool) => tool.name);
   assert(names.includes('omniboard_runner_list_agentic_runs'));
@@ -926,6 +1117,7 @@ try {
   assert(names.includes('omniboard_runner_prepare_next_agentic_run_projects'));
   assert(names.includes('omniboard_runner_prepare_agentic_run_workspace'));
   assert(names.includes('omniboard_runner_finalize_agentic_run_workspace'));
+  assert(names.includes('omniboard_runner_merge_agentic_run'));
   assert(names.includes('omniboard_runner_release_agentic_run_workspace'));
   assert(names.includes('omniboard_runner_report_agentic_run_progress'));
   assert(names.includes('omniboard_runner_report_agentic_run_progress_bulk'));

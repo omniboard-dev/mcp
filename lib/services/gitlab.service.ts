@@ -529,3 +529,38 @@ async function readError(response: Response) {
     return response.statusText;
   }
 }
+
+export async function mergeGitlabMergeRequest(
+  access: GitlabRepositoryAccess,
+  projectPath: string,
+  mergeRequestUrl: string,
+  sourceHeadSha: string
+) {
+  const base = resolveGitlabApiBaseUrl(access.apiBaseUrl);
+  const iid = resolveGitlabMergeRequestIid(access, mergeRequestUrl);
+  const response = await fetchWithTimeout(
+    `${base}/projects/${encodeURIComponent(
+      normalizeProjectPath(projectPath)
+    )}/merge_requests/${iid}/merge`,
+    {
+      method: 'PUT',
+      headers: {
+        'PRIVATE-TOKEN': access.token,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ sha: sourceHeadSha }),
+    }
+  );
+  if (!response.ok)
+    return {
+      merged: false,
+      reason: `GitLab merge returned ${response.status}: ${await readError(
+        response
+      )}`,
+    };
+  const result = (await response.json()) as GitlabMergeRequestResponse;
+  return {
+    merged: result.state === 'merged',
+    reason: result.merge_error ?? undefined,
+  };
+}

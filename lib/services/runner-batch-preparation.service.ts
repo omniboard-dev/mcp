@@ -4,20 +4,23 @@ import {
   RunnerWorkspacePrepareResult,
 } from '../interface.js';
 import { listAgenticRunProjects } from './agentic-runs.service.js';
-import {
-  hasActiveRunnerExecutionLease,
-  RunnerExecutionLeaseConflictError,
-} from './runner-execution.service.js';
+import { getWorkingTreeStatus } from './git.service.js';
 import {
   isRunnerWorkspacePreparationInProgress,
   prepareRunnerWorkspace,
 } from './runner-workspace-preparation.service.js';
 
-const DEFAULT_STATUSES: AgenticRunProgressStatus[] = [
-  'pending',
-  'pending_retry',
-  'blocked',
-  'failed',
+const DEFAULT_STATUS_GROUPS: AgenticRunProgressStatus[][] = [
+  ['pending'],
+  [
+    'in_progress',
+    'implemented',
+    'verified',
+    'committed',
+    'pushed',
+    'mr_created',
+  ],
+  ['pending_retry', 'failed', 'blocked', 'needs_input', 'done'],
 ];
 const DEFAULT_LIMIT = 1;
 const MAX_LIMIT = 10;
@@ -78,7 +81,7 @@ export interface RunnerBatchPreparationProjectResult {
   outcome: 'prepared' | 'waiting' | 'stopped' | 'failed';
   sizeRanking: RunnerBatchProjectSizeRanking;
   preparation?: RunnerWorkspacePrepareResult;
-  reason?: 'preparation_in_progress' | 'execution_lease_active';
+  reason?: 'preparation_in_progress' | 'waiting_for_ci' | 'waiting_for_review';
   error?: string;
 }
 
@@ -86,21 +89,22 @@ export interface RunnerBatchPreparationDependencies {
   listProjects: typeof listAgenticRunProjects;
   prepareWorkspace: typeof prepareRunnerWorkspace;
   isWorkspacePreparationInProgress: typeof isRunnerWorkspacePreparationInProgress;
-  hasActiveExecutionLease: typeof hasActiveRunnerExecutionLease;
+  workingTreeStatus?: typeof getWorkingTreeStatus;
 }
 
 const defaultDependencies: RunnerBatchPreparationDependencies = {
   listProjects: listAgenticRunProjects,
   prepareWorkspace: prepareRunnerWorkspace,
   isWorkspacePreparationInProgress: isRunnerWorkspacePreparationInProgress,
-  hasActiveExecutionLease: hasActiveRunnerExecutionLease,
 };
 
 export async function prepareNextRunnerProjects(
   options: PrepareNextRunnerProjectsOptions,
   dependencies: RunnerBatchPreparationDependencies = defaultDependencies
 ): Promise<RunnerBatchPreparationResult> {
-  const statuses = [...new Set(options.statuses ?? DEFAULT_STATUSES)];
+  const statuses = [
+    ...new Set(options.statuses ?? DEFAULT_STATUS_GROUPS.flat()),
+  ];
   const limit = options.limit ?? DEFAULT_LIMIT;
   assertOptions(statuses, limit);
 
@@ -110,7 +114,10 @@ export async function prepareNextRunnerProjects(
     view: 'full',
   });
   const discoveredProjects = discovery.projects.filter(
-    (project) => project.targetedByRun
+    (project) =>
+      project.progress?.status !== 'merged' &&
+      project.progress?.resolution !== 'merged' &&
+      (project.targetedByRun || Boolean(project.progress))
   );
   const { sourceSelection, projectExtensions } = resolveSourceSelection(
     options.relevantSourceExtensions,
@@ -123,7 +130,17 @@ export async function prepareNextRunnerProjects(
       project,
       sizeRanking: createProjectSizeRanking(project, projectExtensions[index]),
     }))
-    .sort(compareRankedProjects);
+    .sort((left, right) => {
+      if (options.statuses === undefined) {
+        const priority = (project: AgenticRunMatchedProject) =>
+          DEFAULT_STATUS_GROUPS.findIndex((group) =>
+            group.includes(project.progress?.status ?? 'pending')
+          );
+        const difference = priority(left.project) - priority(right.project);
+        if (difference) return difference;
+      }
+      return compareRankedProjects(left, right);
+    });
   sourceSelection.projectsWithSize = candidates.filter(
     ({ sizeRanking }) => sizeRanking.metadataAvailable
   ).length;
@@ -148,8 +165,6 @@ export async function prepareNextRunnerProjects(
       project.name
     )
       ? 'preparation_in_progress'
-      : dependencies.hasActiveExecutionLease(options.runKey, project.name)
-      ? 'execution_lease_active'
       : null;
     if (unavailableReason) {
       summary.waiting += 1;
@@ -168,6 +183,35 @@ export async function prepareNextRunnerProjects(
         runKey: options.runKey,
         projectName: project.name,
       });
+      const waitingReason = await providerWaitingReason(
+        preparation,
+        dependencies.workingTreeStatus ?? getWorkingTreeStatus
+      );
+      if (waitingReason) {
+        const instructions = [
+          waitingReason === 'waiting_for_ci'
+            ? 'The published commit is waiting for CI.'
+            : 'The published change is waiting for provider approval.',
+          'Continue other actionable projects and revisit this MR when the provider state changes.',
+        ];
+        preparation.continuation = {
+          ...preparation.continuation,
+          action: 'wait',
+          reason: 'waiting_for_provider_activity',
+          instructions,
+        };
+        preparation.instructions = instructions;
+        summary.waiting += 1;
+        results.push({
+          projectName: project.name,
+          initialStatus,
+          outcome: 'waiting',
+          reason: waitingReason,
+          sizeRanking,
+          preparation,
+        });
+        continue;
+      }
       const outcome = preparation.workspace
         ? 'prepared'
         : preparation.continuation.action === 'wait'
@@ -190,17 +234,6 @@ export async function prepareNextRunnerProjects(
         preparation,
       });
     } catch (error) {
-      if (error instanceof RunnerExecutionLeaseConflictError) {
-        summary.waiting += 1;
-        results.push({
-          projectName: project.name,
-          initialStatus,
-          outcome: 'waiting',
-          sizeRanking,
-          reason: 'execution_lease_active',
-        });
-        continue;
-      }
       summary.failed += 1;
       results.push({
         projectName: project.name,
@@ -223,6 +256,56 @@ export async function prepareNextRunnerProjects(
     summary,
     results,
   };
+}
+
+async function providerWaitingReason(
+  preparation: RunnerWorkspacePrepareResult,
+  workingTreeStatus: typeof getWorkingTreeStatus
+): Promise<'waiting_for_ci' | 'waiting_for_review' | undefined> {
+  const progress = preparation.projectState.progress;
+  const workspace = preparation.workspace;
+  if (
+    !workspace ||
+    !preparation.projectState.providerSync.success ||
+    !progress.mergeRequestUrl ||
+    !['open', 'opened'].includes(
+      progress.mergeRequestState?.toLowerCase() ?? ''
+    ) ||
+    workspace.recovery?.phase !== 'ready_to_push' ||
+    workspace.preparedHeadSha !== workspace.recovery.sourceHeadSha
+  )
+    return;
+
+  if (
+    ['failed', 'canceled', 'cancelled'].includes(
+      progress.pipelineStatus?.toLowerCase() ?? ''
+    ) ||
+    [
+      'conflict',
+      'need_rebase',
+      'cannot_be_merged',
+      'discussions_not_resolved',
+      'requested_changes',
+      'draft_status',
+    ].includes(progress.mergeRequestDetailedStatus?.toLowerCase() ?? '')
+  )
+    return;
+  const waitingForCi = [
+    'created',
+    'pending',
+    'running',
+    'preparing',
+    'waiting_for_resource',
+  ].includes(progress.pipelineStatus?.toLowerCase() ?? '');
+  const waitingForReview = ['not_approved', 'approvals_syncing'].includes(
+    progress.mergeRequestDetailedStatus?.toLowerCase() ?? ''
+  );
+  if (
+    (!waitingForCi && !waitingForReview) ||
+    (await workingTreeStatus(workspace.localPath))
+  )
+    return;
+  return waitingForCi ? 'waiting_for_ci' : 'waiting_for_review';
 }
 
 function resolveSourceSelection(

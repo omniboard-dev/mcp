@@ -7,7 +7,7 @@ import { McpCliToolDefinition } from '../shared.js';
 export const finalizeAgenticRunWorkspaceTool: McpCliToolDefinition = {
   name: 'omniboard_runner_finalize_agentic_run_workspace',
   description:
-    'Dedicated runner mode: finalize normal work or continue a prepared merge-conflict recovery. Normal work is committed, pushed, and linked to a change request. Recovery may return completed=false with the next exact conflict files; when complete it rebases onto the latest target and updates the validated source branch with force-with-lease.',
+    'Refresh source and target, continue resolved rebases, commit and push the migration, reusing an open MR or replacing a closed one. Conflicts or a recreated checkout return completed=false for migration work and checks before publication. Successful publication is not a merge: inspect CI, fix failures, and merge when the provider permits it.',
   inputSchema: {
     runKey: z.string().min(1),
     projectName: z.string().min(1),
