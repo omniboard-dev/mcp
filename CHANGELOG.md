@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.1.40](https://github.com/omniboard-dev/mcp/compare/v0.1.39...v0.1.40) (2026-10-09)
+
+
+### Features
+
+* **runner:** enforce canonical migration workflow ([c8a37b4](https://github.com/omniboard-dev/mcp/commit/c8a37b493060a79083f7e42a12976522a82ed63a))
+
 ### [0.1.39](https://github.com/omniboard-dev/mcp/compare/v0.1.38...v0.1.39) (2026-10-07)
 
 
