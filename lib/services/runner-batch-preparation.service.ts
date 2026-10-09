@@ -4,7 +4,6 @@ import {
   RunnerWorkspacePrepareResult,
 } from '../interface.js';
 import { listAgenticRunProjects } from './agentic-runs.service.js';
-import { getWorkingTreeStatus } from './git.service.js';
 import {
   isRunnerWorkspacePreparationInProgress,
   prepareRunnerWorkspace,
@@ -20,7 +19,7 @@ const DEFAULT_STATUS_GROUPS: AgenticRunProgressStatus[][] = [
     'pushed',
     'mr_created',
   ],
-  ['pending_retry', 'failed', 'blocked', 'needs_input', 'done'],
+  ['pending_retry', 'failed', 'blocked', 'needs_input'],
 ];
 const DEFAULT_LIMIT = 1;
 const MAX_LIMIT = 10;
@@ -89,7 +88,6 @@ export interface RunnerBatchPreparationDependencies {
   listProjects: typeof listAgenticRunProjects;
   prepareWorkspace: typeof prepareRunnerWorkspace;
   isWorkspacePreparationInProgress: typeof isRunnerWorkspacePreparationInProgress;
-  workingTreeStatus?: typeof getWorkingTreeStatus;
 }
 
 const defaultDependencies: RunnerBatchPreparationDependencies = {
@@ -117,6 +115,8 @@ export async function prepareNextRunnerProjects(
     (project) =>
       project.progress?.status !== 'merged' &&
       project.progress?.resolution !== 'merged' &&
+      project.progress?.resolution !== 'dismissed' &&
+      project.progress?.status !== 'done' &&
       (project.targetedByRun || Boolean(project.progress))
   );
   const { sourceSelection, projectExtensions } = resolveSourceSelection(
@@ -183,35 +183,6 @@ export async function prepareNextRunnerProjects(
         runKey: options.runKey,
         projectName: project.name,
       });
-      const waitingReason = await providerWaitingReason(
-        preparation,
-        dependencies.workingTreeStatus ?? getWorkingTreeStatus
-      );
-      if (waitingReason) {
-        const instructions = [
-          waitingReason === 'waiting_for_ci'
-            ? 'The published commit is waiting for CI.'
-            : 'The published change is waiting for provider approval.',
-          'Continue other actionable projects and revisit this MR when the provider state changes.',
-        ];
-        preparation.continuation = {
-          ...preparation.continuation,
-          action: 'wait',
-          reason: 'waiting_for_provider_activity',
-          instructions,
-        };
-        preparation.instructions = instructions;
-        summary.waiting += 1;
-        results.push({
-          projectName: project.name,
-          initialStatus,
-          outcome: 'waiting',
-          reason: waitingReason,
-          sizeRanking,
-          preparation,
-        });
-        continue;
-      }
       const outcome = preparation.workspace
         ? 'prepared'
         : preparation.continuation.action === 'wait'
@@ -232,6 +203,15 @@ export async function prepareNextRunnerProjects(
         outcome,
         sizeRanking,
         preparation,
+        ...(['waiting_for_ci', 'waiting_for_review'].includes(
+          preparation.continuation.reason
+        )
+          ? {
+              reason: preparation.continuation.reason as
+                | 'waiting_for_ci'
+                | 'waiting_for_review',
+            }
+          : {}),
       });
     } catch (error) {
       summary.failed += 1;
@@ -256,56 +236,6 @@ export async function prepareNextRunnerProjects(
     summary,
     results,
   };
-}
-
-async function providerWaitingReason(
-  preparation: RunnerWorkspacePrepareResult,
-  workingTreeStatus: typeof getWorkingTreeStatus
-): Promise<'waiting_for_ci' | 'waiting_for_review' | undefined> {
-  const progress = preparation.projectState.progress;
-  const workspace = preparation.workspace;
-  if (
-    !workspace ||
-    !preparation.projectState.providerSync.success ||
-    !progress.mergeRequestUrl ||
-    !['open', 'opened'].includes(
-      progress.mergeRequestState?.toLowerCase() ?? ''
-    ) ||
-    workspace.recovery?.phase !== 'ready_to_push' ||
-    workspace.preparedHeadSha !== workspace.recovery.sourceHeadSha
-  )
-    return;
-
-  if (
-    ['failed', 'canceled', 'cancelled'].includes(
-      progress.pipelineStatus?.toLowerCase() ?? ''
-    ) ||
-    [
-      'conflict',
-      'need_rebase',
-      'cannot_be_merged',
-      'discussions_not_resolved',
-      'requested_changes',
-      'draft_status',
-    ].includes(progress.mergeRequestDetailedStatus?.toLowerCase() ?? '')
-  )
-    return;
-  const waitingForCi = [
-    'created',
-    'pending',
-    'running',
-    'preparing',
-    'waiting_for_resource',
-  ].includes(progress.pipelineStatus?.toLowerCase() ?? '');
-  const waitingForReview = ['not_approved', 'approvals_syncing'].includes(
-    progress.mergeRequestDetailedStatus?.toLowerCase() ?? ''
-  );
-  if (
-    (!waitingForCi && !waitingForReview) ||
-    (await workingTreeStatus(workspace.localPath))
-  )
-    return;
-  return waitingForCi ? 'waiting_for_ci' : 'waiting_for_review';
 }
 
 function resolveSourceSelection(

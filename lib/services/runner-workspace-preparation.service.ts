@@ -1,8 +1,9 @@
 import path from 'node:path';
 import {
-  AgenticRunContinuationDecision,
-  RunnerWorkspacePrepareResult,
-} from '../interface.js';
+  getAgenticRunContinuationDecision,
+  workflowContinuation,
+} from './agentic-run-continuation.service.js';
+import { RunnerWorkspacePrepareResult } from '../interface.js';
 import * as api from './api.service.js';
 import {
   getRunnerAgenticRun,
@@ -17,6 +18,7 @@ import {
   getDefaultBranch,
   getEffectiveRepositoryUrl,
   getHeadCommit,
+  getWorkingTreeStatus,
   getMcpStartupGitIdentity,
   getRemoteBranchCommit,
   isRebaseInProgress,
@@ -85,7 +87,7 @@ async function prepare({
   branch,
   localPath: requestedLocalPath,
 }: PrepareRunnerWorkspaceOptions): Promise<RunnerWorkspacePrepareResult> {
-  // This response supplies facts and diagnostics, not permission to work.
+  // Assess provider facts before touching a retained checkout.
   const projectState = await api.refreshAgenticRunProjectState(
     runKey,
     projectName
@@ -93,6 +95,20 @@ async function prepare({
   const runResponse = await getRunnerAgenticRun(projectName, runKey);
   const run = runResponse.run;
   const project = { ...projectState.project, progress: projectState.progress };
+  let continuation = getAgenticRunContinuationDecision(projectState);
+  const result = {
+    run,
+    project,
+    projectState,
+    prompt: run.prompt ?? null,
+    result: runResponse.result,
+  };
+  const inspectLocalWork = ['waiting_for_ci', 'waiting_for_review'].includes(
+    continuation.reason
+  );
+  if (continuation.action !== 'continue' && !inspectLocalWork) {
+    return { ...result, continuation, instructions: continuation.instructions };
+  }
   const retained = getActiveRunnerExecution(runKey, projectName);
   const resolvedUrl = resolveProjectRepositoryUrl(
     project,
@@ -121,39 +137,24 @@ async function prepare({
       retained?.branch ??
       branch,
   });
-  const mrState = mr?.state.toLowerCase();
-  const stopped = mrState === 'merged';
-  const continuation: AgenticRunContinuationDecision = {
-    action: stopped ? 'stop' : mr?.rebaseInProgress ? 'wait' : 'continue',
-    reason:
-      mrState === 'merged'
-        ? 'change_merged'
-        : mr?.rebaseInProgress
-        ? 'waiting_for_provider_activity'
-        : 'active_work',
-    instructions: stopped
-      ? ['The change is already merged.']
-      : mr?.rebaseInProgress
-      ? [
-          'The provider is currently rebasing this branch. Retry when it finishes.',
-        ]
-      : [],
-    diagnostics: projectState.providerSync.diagnostics.flatMap((item) =>
-      [item.name, item.traceExcerpt].filter((value): value is string =>
-        Boolean(value)
-      )
-    ),
-  };
-  const result = {
-    run,
-    project,
-    projectState,
-    prompt: run.prompt ?? null,
-    result: runResponse.result,
-    continuation,
-    instructions: continuation.instructions,
-  };
-  if (continuation.action !== 'continue') return result;
+  if (mr?.state.toLowerCase() === 'merged' || mr?.rebaseInProgress) {
+    continuation = workflowContinuation(
+      mr.state.toLowerCase() === 'merged'
+        ? {
+            outcome: 'complete',
+            reason: 'change_merged',
+            instruction:
+              'The change is already merged. Leave retained local work untouched.',
+          }
+        : {
+            outcome: 'waiting',
+            reason: 'waiting_for_provider_activity',
+            instruction: 'The provider is rebasing this MR. Retry later.',
+          },
+      projectState
+    );
+    return { ...result, continuation, instructions: continuation.instructions };
+  }
 
   const execution = await acquireRunnerExecution(
     {
@@ -181,6 +182,7 @@ async function prepare({
     resolvedUrl,
     await getEffectiveRepositoryUrl('origin', localPath)
   );
+  const headBeforeSynchronization = (await getHeadCommit(localPath)).sha;
   await registerRunnerWorkspace(execution.executionKey, localPath);
   await applyGitIdentity(await getMcpStartupGitIdentity(), localPath);
   const targetBranch =
@@ -236,6 +238,29 @@ async function prepare({
     true
   );
   await writeRunnerState(state);
+  const workspaceChanged =
+    headBeforeSynchronization !== (await getHeadCommit(localPath)).sha;
+  if (inspectLocalWork) {
+    const unpublished =
+      Boolean(await getWorkingTreeStatus(localPath)) ||
+      state.recovery?.phase !== 'ready_to_push' ||
+      state.preparedHeadSha !== state.recovery?.sourceHeadSha;
+    if (!unpublished)
+      return {
+        ...result,
+        continuation,
+        instructions: continuation.instructions,
+      };
+    continuation = workflowContinuation(
+      {
+        outcome: 'actionable',
+        reason: 'local_unpublished_work',
+        instruction:
+          'Local changes or synchronization still need validation and publication.',
+      },
+      projectState
+    );
+  }
   const progressReport = await reportRunnerAgenticRunProgressSafely(
     runKey,
     projectName,
@@ -249,8 +274,10 @@ async function prepare({
   );
   return {
     ...result,
+    continuation,
     workspace: state,
     workspaceCreated: !exists,
+    workspaceChanged,
     progressReport,
     instructions: [
       ...(!exists
@@ -268,7 +295,7 @@ async function prepare({
             state
           ).filter((line) => !/heartbeat|lease|budget|10 minutes/i.test(line))
         : []),
-      'Finalize this workspace to publish the branch and create or reuse an open MR. Progress labels do not gate work. No heartbeat or release is required.',
+      'Finalize this workspace to publish the branch and create or reuse an open MR. Only actionable work may proceed. No heartbeat or release is required.',
     ],
   };
 }

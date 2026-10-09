@@ -187,6 +187,7 @@ function summarizeMatchedProject(
     progress: progress
       ? {
           status: progress.status,
+          workflow: progress.workflow,
           resolution: progress.resolution ?? null,
           resolutionReason: progress.resolutionReason ?? null,
           branch: progress.branch ?? null,

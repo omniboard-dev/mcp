@@ -873,7 +873,44 @@ async function readJsonBody(
     : {};
 }
 
-function send(response: import('node:http').ServerResponse, body: unknown) {
+function send(response: import('node:http').ServerResponse, body: any) {
+  if (body?.progress && body?.providerSync) {
+    const p = body.progress;
+    const outcome =
+      p.resolution === 'merged' || p.mergeRequestState === 'merged'
+        ? 'complete'
+        : p.resolution === 'dismissed'
+        ? 'dismissed'
+        : p.status === 'pending_retry'
+        ? 'actionable'
+        : p.pipelineStatus === 'failed'
+        ? 'actionable'
+        : p.pipelineStatus === 'running'
+        ? 'waiting'
+        : p.mergeRequestDetailedStatus === 'not_approved'
+        ? 'waiting'
+        : 'actionable';
+    const reason =
+      outcome === 'complete'
+        ? 'change_merged'
+        : outcome === 'dismissed'
+        ? 'change_dismissed'
+        : p.pipelineStatus === 'running'
+        ? 'waiting_for_ci'
+        : p.mergeRequestDetailedStatus === 'not_approved'
+        ? 'waiting_for_review'
+        : 'active_work';
+    p.workflow = {
+      outcome,
+      reason,
+      instruction:
+        outcome === 'complete'
+          ? 'The change is already merged.'
+          : outcome === 'dismissed'
+          ? 'Explicit retry required.'
+          : 'Continue according to current provider facts.',
+    };
+  }
   response.end(JSON.stringify(body));
 }
 

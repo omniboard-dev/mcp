@@ -53,6 +53,13 @@ export const projectProgressOutputSchema = z
     status: z.enum(AGENTIC_RUN_PROGRESS_STATUS_VALUES),
     resolution: z.enum(AGENTIC_RUN_RESOLUTION_VALUES).nullable().optional(),
     resolutionReason: nullableString,
+    workflow: z
+      .object({
+        outcome: z.enum(['complete', 'dismissed', 'waiting', 'actionable']),
+        reason: z.string(),
+        instruction: z.string(),
+      })
+      .optional(),
     branch: nullableString,
     commitSha: nullableString,
     mergeRequestUrl: nullableString,
@@ -102,6 +109,9 @@ export const matchedProjectOutputSchema = z
 const continuationOutputSchema = z
   .object({
     action: z.enum(['continue', 'wait', 'stop']),
+    outcome: z
+      .enum(['complete', 'dismissed', 'waiting', 'actionable'])
+      .optional(),
     reason: z.string(),
     instructions: z.array(z.string()),
     diagnostics: z.array(z.string()),

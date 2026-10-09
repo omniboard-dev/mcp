@@ -8,7 +8,7 @@ import { McpCliToolDefinition } from '../shared.js';
 export const prepareNextAgenticRunProjectsTool: McpCliToolDefinition = {
   name: 'omniboard_runner_prepare_next_agentic_run_projects',
   description:
-    'Continue delivering migrations through merge. By default, fill the batch from pending projects first, then started/published work, then failed/blocked/retry work; order by source size within each group. Skip work that is only waiting on CI or approval and continue scanning. Explicit statuses override the default groups and use source-size ordering. Resume and verify started work before finalizing; follow published MRs through CI repair and provider-confirmed merge. Existing work remains selectable after analyzer results change.',
+    'Continue delivering migrations through merge. Each selected project is prepared before work begins; only work on returned workspaces with continuation.action=continue. A retained checkout alone is not evidence of unfinished work. By default, fill the batch from pending projects first, then started/published work, then failed/blocked/retry work; order by source size within each group. Skip work that is only waiting on CI or approval and continue scanning. Explicit statuses override the default groups and use source-size ordering. Resume and verify started work before finalizing; follow published MRs through CI repair and provider-confirmed merge. Existing work remains selectable after analyzer results change.',
   inputSchema: {
     runKey: z.string().min(1),
     statuses: z

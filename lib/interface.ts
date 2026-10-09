@@ -325,7 +325,14 @@ export interface AgenticRunProviderSnapshot {
   diagnostics?: PipelineFailureJobDiagnostic[];
 }
 
+export interface AgenticRunWorkflowDecision {
+  outcome: 'complete' | 'dismissed' | 'waiting' | 'actionable';
+  reason: string;
+  instruction: string;
+}
+
 export interface AgenticRunProjectProgress {
+  workflow?: AgenticRunWorkflowDecision;
   status: AgenticRunProgressStatus;
   resolution?: AgenticRunResolution | null;
   resolutionReason?: string | null;
@@ -380,6 +387,13 @@ export interface AgenticRunProjectState {
 export type AgenticRunContinuationAction = 'continue' | 'wait' | 'stop';
 
 export type AgenticRunContinuationReason =
+  | 'waiting_for_ci'
+  | 'waiting_for_review'
+  | 'needs_input'
+  | 'blocked'
+  | 'completion_unconfirmed'
+  | 'workflow_unavailable'
+  | 'local_unpublished_work'
   | 'active_work'
   | 'actionable_merge_block'
   | 'actionable_review_feedback'
@@ -407,6 +421,7 @@ export interface AgenticRunPipelineRetryResult {
 }
 
 export interface AgenticRunContinuationDecision {
+  outcome?: AgenticRunWorkflowDecision['outcome'];
   action: AgenticRunContinuationAction;
   reason: AgenticRunContinuationReason;
   instructions: string[];
@@ -593,6 +608,7 @@ export interface RunnerWorkspacePrepareResult {
   continuation: AgenticRunContinuationDecision;
   workspace?: RunnerWorkspaceState;
   workspaceCreated?: boolean;
+  workspaceChanged?: boolean;
   prompt: string | null;
   instructions: string[];
   progressReport?: AgenticRunProgressReportResult;

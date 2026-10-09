@@ -285,6 +285,9 @@ when the same automation identity is shared by multiple workflows.
 
 ### Workflow
 
+See [the four-outcome workflow and flowcharts](docs/migration-workflow.md).
+The API supplies the canonical decision; preparation adds local workspace facts.
+
 1. Call `omniboard_runner_list_agentic_runs` to select an active run unless
    the scheduler already supplies a run key.
 2. For manual selection, call `omniboard_runner_list_agentic_run_projects` for
@@ -389,8 +392,10 @@ Prepare up to `limit` actionable migrations (default one, maximum ten). For
 1. Pending projects, including those without stored progress.
 2. Started or published work: in_progress, implemented, verified, committed,
    pushed, mr_created.
-3. Recovery work: pending_retry, failed, blocked, needs_input, and unmerged done
-   or dismissed work.
+3. Recovery work: pending_retry, failed, blocked, needs_input.
+
+Merged and dismissed migrations are excluded. Request an explicit retry to
+reconsider dismissed work; progress reports cannot reopen terminal migrations.
 
 Within each group, order by Analyzer source size. Failed preparations, merged
 changes, and work only waiting for CI or approval do not consume the actionable
@@ -412,10 +417,11 @@ merge, and report remaining waits or blockers.
 3. Fetch the current source and target (normally main), preserve edits, and rebase.
 4. Return the workspace, prompt and any conflicts for the agent to resolve.
 
-Only an already merged change stops; an actual provider rebase in progress waits.
-Closed or declined MRs and dismissed progress remain actionable. Recover their
-source branch and rebase on the latest target, or start fresh if the branch is
-gone. A conflicting rebase returns the same workspace.
+Complete and dismissed decisions stop before checkout work. Waiting decisions
+report their reason. CI/approval waiting can become actionable when the checkout
+contains unpublished work. An unfinished closed/declined MR can be replaced;
+dismissed work first requires an explicit retry. A conflicting rebase returns
+the same workspace for repair.
 
 An existing MR supplies the source branch; otherwise use retained progress,
 explicit input, the run/prompt, or a stable run-key default. The commit message
@@ -431,7 +437,7 @@ changes and pushes the same branch. Rewritten history uses Git's expected-source
 SHA check to avoid overwriting a push that arrived while publication was running.
 It reuses an open MR or creates a replacement when the previous MR is closed or
 declined. A conflict returns `completed: false` with files to resolve. If the
-checkout had to be recreated, finalization returns `completed: false` so the agent
+checkout had to be recreated or synchronization changed HEAD, finalization returns `completed: false` so the agent
 can reapply the prompt and run checks before publishing. Successful publication
 returns `completed: true, published: true`.
 
@@ -445,7 +451,7 @@ request the merge; it returns `merged: true` only after provider confirmation.
 Merge the published migration through GitLab or Bitbucket. The provider enforces
 its merge requirements and returns its reason when merging is unavailable. The
 runner reports done + merged only when the provider confirms it; stale progress
-labels do not prevent the attempt. Already-merged requests return successfully.
+labels do not override the workflow decision. Dismissed or waiting outcomes prevent the attempt. Already-merged requests return successfully.
 
 #### Compatibility heartbeat and release tools
 

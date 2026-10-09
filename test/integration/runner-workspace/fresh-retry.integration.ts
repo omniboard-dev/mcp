@@ -38,7 +38,23 @@ export async function runFreshRetryIntegration(context: any) {
   const accessStart = repositoryAccessRequests.length;
   await releaseAllRunnerExecutions();
 
-  // A dismissed/closed MR still needs the migration; keep its chosen repository.
+  // Dismissed work is terminal until an explicit retry resets its resolution.
+  const dismissed = await prepareRunnerWorkspace(options);
+  assert.equal(dismissed.continuation.outcome, 'dismissed');
+  assert.equal(dismissed.workspace, undefined);
+  const dismissedBatch = await prepareNextRunnerProjects({
+    runKey: options.runKey,
+  });
+  assert.equal(dismissedBatch.summary.prepared, 0);
+  state.projectProgressStatus = 'pending_retry';
+  state.projectProgressResolution = null;
+  state.projectRetryInstructions = [
+    {
+      id: 1,
+      instruction: 'Retry this dismissed migration.',
+      requestedFromStatus: 'done',
+    },
+  ];
   const retry = await prepareRunnerWorkspace(options);
   assert.equal(retry.continuation.action, 'continue');
   assert.equal(retry.workspace.repositoryUrl, registeredFileRepositoryUrl);

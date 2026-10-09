@@ -44,15 +44,7 @@ export async function finalizeRunnerWorkspace(
         state.localPath
     );
   const progressReports: RunnerWorkspaceFinalizeResult['progressReports'] = [];
-  if (prepared.workspaceCreated)
-    return {
-      completed: false,
-      workspace: state,
-      progressReports,
-      instructions: [
-        'The runner checkout was recreated. Apply the run prompt and run the relevant checks in this fresh workspace before finalizing again.',
-      ],
-    };
+  const headBeforeRecovery = (await getHeadCommit(state.localPath)).sha;
   const conflicts = await getConflictedFiles(state.localPath);
   if (conflicts.length)
     return {
@@ -77,6 +69,21 @@ export async function finalizeRunnerWorkspace(
     )
       return recovery;
   }
+  if (
+    prepared.workspaceCreated ||
+    prepared.workspaceChanged ||
+    headBeforeRecovery !== (await getHeadCommit(state.localPath)).sha
+  )
+    return {
+      completed: false,
+      workspace: state,
+      progressReports,
+      instructions: [
+        prepared.workspaceCreated
+          ? 'The runner checkout was recreated. Apply the run prompt and run the relevant checks in this fresh workspace before finalizing again.'
+          : 'Synchronization changed the checkout. Review the changes and rerun relevant checks before finalizing again.',
+      ],
+    };
   const expectedSource = state.recovery?.sourceHeadSha;
   const mrUrl =
     state.recovery?.mergeRequestUrl ??

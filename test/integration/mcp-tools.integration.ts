@@ -51,6 +51,11 @@ const pendingRetryContinuation = getAgenticRunContinuationDecision({
   project: { currentlyMatchesCheck: true },
   progress: {
     status: 'pending_retry',
+    workflow: {
+      outcome: 'actionable',
+      reason: 'operator_retry_requested',
+      instruction: 'Reassess the migration.',
+    },
     retryInstructions: [
       {
         id: 1,
@@ -70,6 +75,32 @@ assert(
     instruction.includes('Reuse the existing parser.')
   )
 );
+
+for (const [workflow, syncSuccess, expected] of [
+  [undefined, true, 'waiting'],
+  [
+    { outcome: 'actionable', reason: 'active_work', instruction: 'Work' },
+    false,
+    'waiting',
+  ],
+  [
+    { outcome: 'dismissed', reason: 'change_dismissed', instruction: 'Stop' },
+    true,
+    'dismissed',
+  ],
+  [
+    { outcome: 'complete', reason: 'change_merged', instruction: 'Stop' },
+    true,
+    'complete',
+  ],
+] as const) {
+  const decision = getAgenticRunContinuationDecision({
+    progress: { workflow },
+    providerSync: { success: syncSuccess, diagnostics: [] },
+  } as any);
+  assert.equal(decision.outcome, expected);
+  assert.notEqual(decision.action, 'continue');
+}
 
 const run = {
   runKey: 'run-icons',
@@ -153,10 +184,10 @@ const unfulfilledRetryBatch = await prepareNextRunnerProjects(
 );
 assert.equal(retryDiscoveryRequests.length, 1);
 assert.deepEqual(retryDiscoveryRequests[0].statuses, ['pending_retry', 'done']);
-assert.equal(unfulfilledRetryBatch.candidatesTotal, 2);
+assert.equal(unfulfilledRetryBatch.candidatesTotal, 1);
 assert.equal(
   unfulfilledRetryBatch.results[0].projectName,
-  nonTargetedRetryProject.name
+  unfulfilledRetryProject.name
 );
 assert.equal(unfulfilledRetryBatch.results[0].outcome, 'stopped');
 
@@ -321,7 +352,6 @@ assert.deepEqual(
     'published',
     'failed',
     'blocked',
-    'dismissed',
     'retry',
   ]
 );
@@ -395,7 +425,6 @@ for (const reason of ['waiting_for_ci', 'waiting_for_review']) {
     { runKey: run.runKey, limit: 1 },
     {
       ...statusSelectionDependencies,
-      workingTreeStatus: async () => '',
       prepareWorkspace: async ({ projectName }) => {
         if (projectName === 'stored-pending')
           throw new Error('Repository unavailable');
@@ -414,13 +443,12 @@ for (const reason of ['waiting_for_ci', 'waiting_for_review']) {
                 ? 'not_approved'
                 : 'ci_still_running',
           });
-          Object.assign(result.workspace, {
-            preparedHeadSha: 'published-sha',
-            recovery: {
-              phase: 'ready_to_push',
-              sourceHeadSha: 'published-sha',
-            },
-          });
+          result.continuation = {
+            ...result.continuation,
+            action: 'wait',
+            reason,
+          };
+          delete result.workspace;
         }
         return result;
       },
@@ -455,8 +483,6 @@ for (const condition of [
     { runKey: run.runKey, limit: 1, statuses: ['mr_created'] },
     {
       ...statusSelectionDependencies,
-      workingTreeStatus: async () =>
-        condition === 'dirty' ? ' M src/app.ts' : '',
       prepareWorkspace: async ({ projectName }) => {
         const result = preparation(projectName, 'continue', true);
         Object.assign(result.projectState.progress, {
@@ -1108,7 +1134,24 @@ try {
   );
   assert.match(
     instructions,
-    /Duplicate effort is an accepted efficiency tradeoff/
+    /Duplicate effort on unfinished work is an accepted efficiency tradeoff/
+  );
+  assert.match(instructions, /A completed migration must not be republished/);
+  assert.match(
+    instructions,
+    /Mandatory preflight for every agent and environment/
+  );
+  assert.match(
+    instructions,
+    /On stop\/change_merged, leave retained local work untouched/
+  );
+  assert.match(
+    instructions,
+    /Do not replay whole files from an old migration commit/
+  );
+  assert.match(
+    instructions,
+    /old local test results do not validate a newly assembled remote commit/
   );
   const { tools } = await client.listTools();
   const names = tools.map((tool) => tool.name);

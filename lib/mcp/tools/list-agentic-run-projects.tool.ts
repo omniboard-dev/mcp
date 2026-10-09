@@ -8,7 +8,7 @@ import { McpCliToolDefinition } from '../shared.js';
 export const listAgenticRunProjectsTool: McpCliToolDefinition = {
   name: 'omniboard_runner_list_agentic_run_projects',
   description:
-    'Dedicated runner discovery: read stored fulfilled, unfulfilled, and unchecked Omniboard projects and progress without refreshing providers, preparing workspaces, or changing agentic-run state. Each project includes its fulfillment group so the run prompt can address any current check-result variant. Provider status may be stale until a selected project is prepared.',
+    'Dedicated runner discovery: read stored fulfilled, unfulfilled, and unchecked Omniboard projects and progress without refreshing providers, preparing workspaces, or changing agentic-run state. Each project includes its fulfillment group so the run prompt can address any current check-result variant. Provider status may be stale until a selected project is prepared. This list is not permission to begin migration work: call workspace or batch preparation first, including for work discovered in a local checkout.',
   inputSchema: {
     checkName: z.string().min(1).optional(),
     runKey: z.string().min(1).optional(),

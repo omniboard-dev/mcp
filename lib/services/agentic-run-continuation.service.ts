@@ -1,289 +1,64 @@
 import {
   AgenticRunContinuationDecision,
   AgenticRunProjectState,
+  AgenticRunWorkflowDecision,
 } from '../interface.js';
-
-const ACTIONABLE_REVIEW_STATUSES = new Set([
-  'discussions_not_resolved',
-  'requested_changes',
-]);
-const ACTIONABLE_MERGE_STATUSES = new Set([
-  'cannot_be_merged',
-  'conflict',
-  'need_rebase',
-]);
-const INFRASTRUCTURE_FAILURE_REASONS = new Set([
-  'api_failure',
-  'data_integrity_failure',
-  'runner_system_failure',
-  'scheduler_failure',
-  'stuck_or_timeout_failure',
-]);
 
 export function getAgenticRunContinuationDecision(
   projectState: AgenticRunProjectState
 ): AgenticRunContinuationDecision {
-  const diagnostics = formatPipelineDiagnostics(projectState);
-
+  const workflow = projectState.progress.workflow;
+  if (!workflow) {
+    return workflowContinuation(
+      {
+        outcome: 'waiting',
+        reason: 'workflow_unavailable',
+        instruction:
+          'The API did not return a workflow decision. Update the API before using this MCP version.',
+      },
+      projectState
+    );
+  }
   if (
-    projectState.project.targetedByRun === false &&
-    projectState.progress.hasProgress === false
+    !projectState.providerSync.success &&
+    !['complete', 'dismissed'].includes(workflow.outcome)
   ) {
-    return decision(
-      'stop',
-      'result_not_targeted',
-      [
-        'The current check result is not targeted by this agentic run. Do not prepare or modify this project.',
-        currentResultGuidance(projectState),
-      ],
-      diagnostics
+    return workflowContinuation(
+      {
+        outcome: 'waiting',
+        reason: 'provider_sync_failed',
+        instruction:
+          projectState.providerSync.error ||
+          'Provider state could not be refreshed. Do not start or republish migration work.',
+      },
+      projectState
     );
   }
-
-  if (projectState.progress.status === 'done') {
-    return doneDecision(projectState, diagnostics);
-  }
-
-  if (!projectState.providerSync.success) {
-    return decision(
-      'wait',
-      'provider_sync_failed',
-      [
-        'Provider state could not be refreshed. Do not create a duplicate branch or change request.',
-        projectState.providerSync.error ?? 'Provider synchronization failed.',
-      ],
-      diagnostics
-    );
-  }
-
-  switch (projectState.progress.status) {
-    case 'pending':
-    case 'in_progress':
-    case 'implemented':
-    case 'verified':
-    case 'committed':
-    case 'pushed':
-      return decision(
-        'continue',
-        'active_work',
-        [currentResultGuidance(projectState)],
-        diagnostics
-      );
-    case 'pending_retry': {
-      const retryInstruction = projectState.progress.retryInstructions?.[0];
-      return decision(
-        'continue',
-        'operator_retry_requested',
-        [
-          'A user explicitly requested another attempt for this project.',
-          currentResultGuidance(projectState),
-          retryInstruction
-            ? 'Operator guidance: ' + retryInstruction.instruction
-            : 'No operator guidance was returned. Inspect the previous failure before continuing.',
-        ],
-        diagnostics
-      );
-    }
-    case 'failed':
-      if (
-        projectState.progress.pipelineStatus === 'failed' &&
-        hasOnlyInfrastructureFailures(projectState)
-      ) {
-        return decision(
-          'wait',
-          'infrastructure_pipeline_failure',
-          [
-            'The pipeline failure is classified as infrastructure-related. Do not modify project code automatically.',
-            ...diagnostics,
-          ],
-          diagnostics
-        );
-      }
-      if (projectState.progress.pipelineStatus === 'failed') {
-        return decision(
-          'continue',
-          'application_pipeline_failure',
-          [
-            'Continue work to resolve the application pipeline failure.',
-            currentResultGuidance(projectState),
-            ...operatorRetryGuidance(projectState),
-            ...diagnostics,
-          ],
-          diagnostics
-        );
-      }
-      return decision(
-        'continue',
-        'retry_failed_work',
-        [
-          'Retry the failed agentic run work.',
-          currentResultGuidance(projectState),
-          ...operatorRetryGuidance(projectState),
-        ],
-        diagnostics
-      );
-    case 'needs_input':
-      if (
-        ACTIONABLE_REVIEW_STATUSES.has(
-          normalizeProviderStatus(
-            projectState.progress.mergeRequestDetailedStatus
-          )
-        )
-      ) {
-        return decision(
-          'continue',
-          'actionable_review_feedback',
-          [
-            'Continue work to resolve the provider review feedback.',
-            currentResultGuidance(projectState),
-          ],
-          diagnostics
-        );
-      }
-      return decision(
-        'wait',
-        'waiting_for_provider_activity',
-        [
-          'The run needs input, but provider state does not identify actionable review feedback. Wait for updated provider activity.',
-          ...diagnostics,
-        ],
-        diagnostics
-      );
-    case 'blocked':
-      if (isTargetSynchronizationRecovery(projectState.progress.metadata)) {
-        return decision(
-          'continue',
-          'active_work',
-          [
-            'Continue the checkpointed target-branch synchronization recovery in the retained runner workspace.',
-            currentResultGuidance(projectState),
-          ],
-          diagnostics
-        );
-      }
-      if (
-        ACTIONABLE_MERGE_STATUSES.has(
-          normalizeProviderStatus(
-            projectState.progress.mergeRequestDetailedStatus
-          )
-        )
-      ) {
-        return decision(
-          'continue',
-          'actionable_merge_block',
-          [
-            'Continue work to resolve the provider mergeability issue.',
-            currentResultGuidance(projectState),
-          ],
-          diagnostics
-        );
-      }
-
-      return decision(
-        'wait',
-        'waiting_for_provider_activity',
-        [
-          'The run is blocked without an actionable mergeability status. Wait for updated provider activity.',
-          ...diagnostics,
-        ],
-        diagnostics
-      );
-    case 'mr_created':
-      return decision(
-        'wait',
-        'waiting_for_provider_activity',
-        [
-          'The change request remains open without an actionable failure. Wait for provider activity.',
-        ],
-        diagnostics
-      );
-    case 'merged':
-      return decision(
-        'stop',
-        'change_merged',
-        [
-          'The change request is merged. No further workspace work is required.',
-        ],
-        diagnostics
-      );
-    default:
-      return decision(
-        'wait',
-        'unsupported_progress_status',
-        [
-          'The canonical progress status "' +
-            String(projectState.progress.status) +
-            '" is not supported. Wait for an MCP CLI update.',
-        ],
-        diagnostics
-      );
-  }
+  return workflowContinuation(workflow, projectState);
 }
 
-function isTargetSynchronizationRecovery(
-  metadata?: Record<string, unknown> | null
-) {
-  return (
-    metadata?.remediation === 'target_sync' &&
-    (metadata.remediationPhase === 'in_progress' ||
-      metadata.remediationPhase === 'conflicts' ||
-      metadata.remediationPhase === 'ready_to_push')
-  );
-}
-
-function currentResultGuidance(projectState: AgenticRunProjectState) {
-  return `The current agentic check result is ${projectState.project.fulfillment}. Apply the run prompt for this result variant.`;
-}
-
-function operatorRetryGuidance(projectState: AgenticRunProjectState) {
-  const retryInstruction = projectState.progress.retryInstructions?.[0];
-  return retryInstruction
-    ? ['Operator guidance: ' + retryInstruction.instruction]
-    : [];
-}
-
-function doneDecision(
-  projectState: AgenticRunProjectState,
-  diagnostics: string[]
-): AgenticRunContinuationDecision {
-  if (projectState.progress.resolution === 'dismissed') {
-    return decision(
-      'stop',
-      'change_dismissed',
-      ['The finding was dismissed. No further workspace work is required.'],
-      diagnostics
-    );
-  }
-
-  if (projectState.progress.resolution === 'merged') {
-    return decision(
-      'stop',
-      'change_merged',
-      ['The change request is merged. No further workspace work is required.'],
-      diagnostics
-    );
-  }
-
-  return decision(
-    'stop',
-    'change_completed',
-    ['The run is done. No further workspace work is required.'],
-    diagnostics
-  );
-}
-
-export function hasOnlyInfrastructureFailures(
+export function workflowContinuation(
+  workflow: AgenticRunWorkflowDecision,
   projectState: AgenticRunProjectState
-) {
-  const diagnostics = projectState.providerSync.diagnostics;
-  return (
-    diagnostics.length > 0 &&
-    diagnostics.every((diagnostic) =>
-      INFRASTRUCTURE_FAILURE_REASONS.has(
-        normalizeProviderStatus(diagnostic.failureReason)
-      )
-    )
-  );
+): AgenticRunContinuationDecision {
+  const retry = projectState.progress.retryInstructions?.[0];
+  return {
+    outcome: workflow.outcome,
+    action:
+      workflow.outcome === 'actionable'
+        ? 'continue'
+        : workflow.outcome === 'waiting'
+        ? 'wait'
+        : 'stop',
+    reason: workflow.reason as AgenticRunContinuationDecision['reason'],
+    instructions: [
+      workflow.instruction,
+      ...(retry && workflow.outcome === 'actionable'
+        ? ['Operator guidance: ' + retry.instruction]
+        : []),
+    ],
+    diagnostics: formatPipelineDiagnostics(projectState),
+  };
 }
 
 export function formatPipelineDiagnostics(
@@ -310,22 +85,4 @@ export function formatPipelineDiagnostics(
     summary ? 'Pipeline failure: ' + summary : null,
     ...diagnostics,
   ].filter((value): value is string => !!value);
-}
-
-function decision(
-  action: AgenticRunContinuationDecision['action'],
-  reason: AgenticRunContinuationDecision['reason'],
-  instructions: string[],
-  diagnostics: string[]
-): AgenticRunContinuationDecision {
-  return {
-    action,
-    reason,
-    instructions,
-    diagnostics,
-  };
-}
-
-function normalizeProviderStatus(value?: string | null) {
-  return value?.trim().toLowerCase() ?? '';
 }

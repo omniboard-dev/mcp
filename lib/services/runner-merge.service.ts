@@ -1,4 +1,5 @@
 import * as api from './api.service.js';
+import { getAgenticRunContinuationDecision } from './agentic-run-continuation.service.js';
 import { reportRunnerAgenticRunProgressSafely } from './agentic-runs.service.js';
 import { mergeBitbucketPullRequest } from './bitbucket-data-center.service.js';
 import { mergeGitlabMergeRequest } from './gitlab.service.js';
@@ -13,6 +14,15 @@ export async function mergeRunnerChange(runKey: string, projectName: string) {
     runKey,
     projectName
   );
+  const continuation = getAgenticRunContinuationDecision(projectState);
+  if (continuation.outcome === 'dismissed' || continuation.action === 'wait') {
+    return {
+      merged: false,
+      reason: continuation.instructions.join(' '),
+      projectState,
+      instructions: continuation.instructions,
+    };
+  }
   const url = projectState.progress.mergeRequestUrl;
   if (!url) throw new Error('Publish the migration before merging it.');
   const repositoryUrl = resolveProjectRepositoryUrl(

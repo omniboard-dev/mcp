@@ -90,9 +90,39 @@ export async function runSimpleFlowIntegration(context: any) {
   await finalizeRunnerWorkspace({ ...options, localPath });
   assert.equal(state.mergeRequestCreateCount, 1);
 
+  const publishedBeforeTargetChange = await git(
+    remotePath,
+    'rev-parse',
+    'refs/heads/agentic/run-icons'
+  );
+  await seedCommit('requires-revalidation.txt', 'new target code\n');
+  const revalidation = await finalizeRunnerWorkspace({ ...options, localPath });
+  assert.equal(revalidation.completed, false);
+  assert(
+    revalidation.instructions.some((line) =>
+      line.includes('rerun relevant checks')
+    )
+  );
+  assert.equal(
+    await git(remotePath, 'rev-parse', 'refs/heads/agentic/run-icons'),
+    publishedBeforeTargetChange
+  );
+  const revalidated = await finalizeRunnerWorkspace({ ...options, localPath });
+  assert.equal(revalidated.published, true);
+
   // Real conflict after main moves. Resume with Git state even across shutdown.
   await fs.writeFile(path.join(localPath, 'README.md'), '# Migrated\n');
   await finalizeRunnerWorkspace({ ...options, localPath });
+  await fs.writeFile(
+    path.join(localPath, 'later-commit.txt'),
+    'Applied after conflict resolution\n'
+  );
+  await finalizeRunnerWorkspace({ ...options, localPath });
+  const beforeRecovery = await git(
+    remotePath,
+    'rev-parse',
+    'refs/heads/agentic/run-icons'
+  );
   await seedCommit('README.md', '# Main changed\n');
   const conflicted = await prepareRunnerWorkspace(options);
   assert.deepEqual(conflicted.workspace.recovery.conflictFiles, ['README.md']);
@@ -107,6 +137,22 @@ export async function runSimpleFlowIntegration(context: any) {
     '# Main changed and migrated\n'
   );
   await git(localPath, 'add', 'README.md');
+  await assert.rejects(fs.access(path.join(localPath, 'later-commit.txt')));
+  const recovered = await finalizeRunnerWorkspace({ ...options, localPath });
+  assert.equal(recovered.completed, false);
+  assert(
+    recovered.instructions.some((line) =>
+      line.includes('rerun relevant checks')
+    )
+  );
+  assert.equal(
+    await fs.readFile(path.join(localPath, 'later-commit.txt'), 'utf8'),
+    'Applied after conflict resolution\n'
+  );
+  assert.equal(
+    await git(remotePath, 'rev-parse', 'refs/heads/agentic/run-icons'),
+    beforeRecovery
+  );
   const fixed = await finalizeRunnerWorkspace({ ...options, localPath });
   assert.equal(fixed.published, true);
   assert.equal(
@@ -131,7 +177,11 @@ export async function runSimpleFlowIntegration(context: any) {
   );
   state.projectPipelineStatus = 'failed';
   const ci = await prepareRunnerWorkspace(options);
-  assert(ci.continuation.diagnostics.includes('Expected true, received false'));
+  assert(
+    ci.continuation.diagnostics.some((line) =>
+      line.includes('Expected true, received false')
+    )
+  );
   assert.equal(
     await fs.readFile(path.join(localPath, 'other.txt'), 'utf8'),
     'Other contribution\n'
@@ -171,7 +221,36 @@ export async function runSimpleFlowIntegration(context: any) {
     true
   );
   assert.equal(state.mergeCalls, 2, 'Already merged is idempotent');
-  assert.equal((await prepareRunnerWorkspace(options)).workspace, undefined);
+  await fs.writeFile(path.join(localPath, 'stale-work.txt'), 'do not resume\n');
+  await releaseAllRunnerExecutions();
+  const headBeforeResume = await git(localPath, 'rev-parse', 'HEAD');
+  const remoteBeforeResume = await git(
+    remotePath,
+    'rev-parse',
+    'refs/heads/agentic/run-icons'
+  );
+  const stopped = await prepareRunnerWorkspace({ ...options, localPath });
+  assert.equal(stopped.continuation.action, 'stop');
+  assert.equal(stopped.continuation.reason, 'change_merged');
+  assert.equal(stopped.workspace, undefined);
+  await assert.rejects(
+    finalizeRunnerWorkspace({ ...options, localPath }),
+    /already merged/
+  );
+  assert.equal(await git(localPath, 'rev-parse', 'HEAD'), headBeforeResume);
+  assert.equal(
+    await fs.readFile(path.join(localPath, 'stale-work.txt'), 'utf8'),
+    'do not resume\n'
+  );
+  assert.equal(
+    await git(remotePath, 'rev-parse', 'refs/heads/agentic/run-icons'),
+    remoteBeforeResume
+  );
+  assert.equal(
+    state.mergeRequestCreateCount,
+    1,
+    'Merged retained work must not create another MR'
+  );
   console.log(
     'Simple migration flow: fresh checkout, retained edits, restart, target conflict, source update and CI repair passed.'
   );
