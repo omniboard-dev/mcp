@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.1.44](https://github.com/omniboard-dev/mcp/compare/v0.1.43...v0.1.44) (2026-10-09)
+
+
+### Bug Fixes
+
+* **runner:** block publication of empty merge requests ([ebd41de](https://github.com/omniboard-dev/mcp/commit/ebd41def589e7a1f760117ddcbb741e446958eec))
+
 ### [0.1.43](https://github.com/omniboard-dev/mcp/compare/v0.1.42...v0.1.43) (2026-10-09)
 
 
