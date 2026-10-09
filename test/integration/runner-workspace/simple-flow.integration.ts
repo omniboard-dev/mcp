@@ -32,6 +32,34 @@ export async function runSimpleFlowIntegration(context: any) {
     await git(localPath, 'branch', '--show-current'),
     'agentic/run-icons'
   );
+  const assertEmptyPublicationBlocked = async () => {
+    const result = await finalizeRunnerWorkspace({ ...options, localPath });
+    assert.equal(result.completed, false);
+    assert.equal(result.published, false);
+    assert.equal(result.mergeRequest, undefined);
+    assert.match(result.instructions.join(' '), /no changes/);
+    assert.match(result.instructions.join(' '), /resolution=dismissed/);
+    assert.equal(state.mergeRequestCreateCount, 0);
+    assert.equal(
+      await git(remotePath, 'branch', '--list', 'agentic/run-icons'),
+      ''
+    );
+    assert.equal(
+      context.progress.some((entry: any) => entry.status === 'mr_created'),
+      false
+    );
+  };
+  await assertEmptyPublicationBlocked();
+  await git(localPath, 'commit', '--allow-empty', '-m', 'Empty migration');
+  await assertEmptyPublicationBlocked();
+  await fs.writeFile(
+    path.join(localPath, 'reverted.txt'),
+    'temporary change\n'
+  );
+  await git(localPath, 'add', 'reverted.txt');
+  await git(localPath, 'commit', '-m', 'Temporary migration');
+  await git(localPath, 'revert', '--no-edit', 'HEAD');
+  await assertEmptyPublicationBlocked();
   await fs.writeFile(
     path.join(localPath, 'migration.txt'),
     'Vitest migration\n'

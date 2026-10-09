@@ -8,6 +8,7 @@ import {
   getEffectiveRepositoryUrl,
   getHeadCommit,
   getWorkingTreeStatus,
+  hasBranchChanges,
   isRebaseInProgress,
   pushBranch,
   pushBranchWithLease,
@@ -93,6 +94,19 @@ export async function finalizeRunnerWorkspace(
     ? await commitAll(message, state.localPath)
     : (await getHeadCommit(state.localPath)).sha;
   state.commitSha = commitSha;
+  if (!(await hasBranchChanges(state.targetBranch, commitSha, state.localPath)))
+    return {
+      completed: false,
+      published: false,
+      workspace: state,
+      commitSha,
+      progressReports,
+      instructions: [
+        'Publication stopped: the branch has no changes against the refreshed target branch. No branch was pushed or merge request created.',
+        'Review the run prompt and current code. If work is still required, apply it, run the relevant checks, and finalize again.',
+        'If no work is needed, report resolution=dismissed with a concrete resolutionReason using omniboard_runner_report_agentic_run_progress. An empty diff alone does not prove the task is complete.',
+      ],
+    };
   const access = await api.getRepositoryAccess(state.repositoryUrl);
   const repositoryUrl = await getEffectiveRepositoryUrl(
     state.repositoryUrl,

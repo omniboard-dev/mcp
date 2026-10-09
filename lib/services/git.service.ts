@@ -398,6 +398,25 @@ export async function getConflictedFiles(targetDir: string) {
     .filter(Boolean);
 }
 
+export async function hasBranchChanges(
+  targetBranch: string,
+  commitSha: string,
+  targetDir: string
+) {
+  validateBranch(targetBranch);
+  const { stdout } = await runGit(
+    [
+      'diff',
+      '--name-only',
+      '--no-ext-diff',
+      `refs/remotes/origin/${targetBranch}...${commitSha}`,
+      '--',
+    ],
+    targetDir
+  );
+  return stdout.trim().length > 0;
+}
+
 export async function getWorkingTreeStatus(targetDir: string) {
   const { stdout } = await runGit(
     ['-c', 'core.fsmonitor=false', 'status', '--porcelain'],
