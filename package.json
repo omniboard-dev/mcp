@@ -4,7 +4,7 @@
   "type": "module",
   "main": "dist/index.js",
   "bin": {
-    "omniboard-mcp": "./dist/index.js"
+    "omniboard-mcp": "dist/index.js"
   },
   "engines": {
     "node": ">=18.0.0"
@@ -51,7 +51,7 @@
   "author": "Tomas Trajan <@tomastrajan>",
   "repository": {
     "type": "git",
-    "url": "https://github.com/omniboard-dev/mcp.git"
+    "url": "git+https://github.com/omniboard-dev/mcp.git"
   },
   "bugs": {
     "url": "https://github.com/omniboard-dev/mcp/issues"
