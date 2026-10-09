@@ -19,10 +19,11 @@ run with its `runKey`.
 ## Delivery goal
 
 The MCP server sends its prime directive to the coding client during initialization:
-deliver the requested migration and reach provider-confirmed merge. Use that goal
+deliver the requested migration until an open, green, mergeable MR exists. Use that goal
 to resolve ambiguous next steps within the user's scope and constraints.
-Publication alone is not completion. Continue through verification, CI repair and
-merge; recover disposable runner state and closed MRs as needed. Duplicate effort
+After publication, wait for running CI and repair failed CI or conflicts. Once
+the MR is green and mergeable, no further agent work remains. Merging belongs to
+the user or consuming team. Recover disposable runner state and closed MRs as needed. Duplicate effort
 is an accepted efficiency tradeoff. When external requirements prevent progress,
 report the concrete blocker and continue other actionable projects.
 
@@ -398,17 +399,15 @@ Merged and dismissed migrations are excluded. Request an explicit retry to
 reconsider dismissed work; progress reports cannot reopen terminal migrations.
 
 Within each group, order by Analyzer source size. Failed preparations, merged
-changes, and work only waiting for CI or approval do not consume the actionable
-limit; keep scanning the remaining groups. Waiting is reported only when the
-checkout is clean and its synchronized HEAD matches the published source commit.
-Local edits, unpublished rebases and actionable failures remain work to finish.
+changes, green mergeable MRs, and work waiting for CI or approval do not consume the actionable
+limit; keep scanning the remaining groups. Waiting returns before checkout operations and preserves retained local edits.
+Failed CI or conflicts make published work actionable again.
 Already-merged progress is excluded.
 
 Explicit `statuses` replace the default groups and use source-size ordering:
 `["pending"]` requests only new work; `["failed", "blocked"]` requests repairs.
 Existing work remains selectable after its analyzer result changes. A prepared
-batch is not a completed migration batch: finish each selected project through
-merge, and report remaining waits or blockers.
+batch is not a completed migration batch: continue each selected project until an open, green, mergeable MR exists, and report remaining waits or blockers.
 
 #### `omniboard_runner_prepare_agentic_run_workspace`
 
@@ -418,8 +417,7 @@ merge, and report remaining waits or blockers.
 4. Return the workspace, prompt and any conflicts for the agent to resolve.
 
 Complete and dismissed decisions stop before checkout work. Waiting decisions
-report their reason. CI/approval waiting can become actionable when the checkout
-contains unpublished work. An unfinished closed/declined MR can be replaced;
+report their reason. Green mergeable MRs and CI/approval waits leave the checkout untouched. An unfinished closed/declined MR can be replaced;
 dismissed work first requires an explicit retry. A conflicting rebase returns
 the same workspace for repair.
 
@@ -441,17 +439,11 @@ checkout had to be recreated or synchronization changed HEAD, finalization retur
 can reapply the prompt and run checks before publishing. Successful publication
 returns `completed: true, published: true`.
 
-Publication does not mean the migration merged. The agent must inspect the MR
-pipeline, use failure logs to repair it, rerun checks, publish again, and merge
-when the provider's checks permit it. Call `omniboard_runner_merge_agentic_run` to
-request the merge; it returns `merged: true` only after provider confirmation.
-
-#### `omniboard_runner_merge_agentic_run`
-
-Merge the published migration through GitLab or Bitbucket. The provider enforces
-its merge requirements and returns its reason when merging is unavailable. The
-runner reports done + merged only when the provider confirms it; stale progress
-labels do not override the workflow decision. Dismissed or waiting outcomes prevent the attempt. Already-merged requests return successfully.
+After publication, wait while CI runs. Repair failed CI and rebase conflicts on the
+existing MR until it is green and mergeable, then no further agent work remains.
+Keep the mr_created milestone and derive waiting from provider facts. The MCP does
+not expose a merge tool; merging belongs to the user or consuming team. A later
+human merge is recorded only after provider confirmation.
 
 #### Compatibility heartbeat and release tools
 

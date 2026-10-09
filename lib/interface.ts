@@ -387,6 +387,7 @@ export interface AgenticRunProjectState {
 export type AgenticRunContinuationAction = 'continue' | 'wait' | 'stop';
 
 export type AgenticRunContinuationReason =
+  | 'merge_request_ready'
   | 'waiting_for_ci'
   | 'waiting_for_review'
   | 'needs_input'

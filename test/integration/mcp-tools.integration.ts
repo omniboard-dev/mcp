@@ -420,7 +420,11 @@ const repairFallback = await prepareNextRunnerProjects(
 );
 assert.equal(repairFallback.results[0].projectName, 'failed');
 
-for (const reason of ['waiting_for_ci', 'waiting_for_review']) {
+for (const reason of [
+  'waiting_for_ci',
+  'waiting_for_review',
+  'merge_request_ready',
+]) {
   const waitingBatch = await prepareNextRunnerProjects(
     { runKey: run.runKey, limit: 1 },
     {
@@ -441,6 +445,8 @@ for (const reason of ['waiting_for_ci', 'waiting_for_review']) {
             mergeRequestDetailedStatus:
               reason === 'waiting_for_review'
                 ? 'not_approved'
+                : reason === 'merge_request_ready'
+                ? 'mergeable'
                 : 'ci_still_running',
           });
           result.continuation = {
@@ -472,13 +478,7 @@ for (const reason of ['waiting_for_ci', 'waiting_for_review']) {
   assert.equal(waitingBatch.summary.waiting, 2);
 }
 
-for (const condition of [
-  'dirty',
-  'rebased',
-  'ci_failed',
-  'review_changes',
-  'mergeable',
-]) {
+for (const condition of ['dirty', 'rebased', 'ci_failed', 'review_changes']) {
   const actionable = await prepareNextRunnerProjects(
     { runKey: run.runKey, limit: 1, statuses: ['mr_created'] },
     {
@@ -1126,8 +1126,8 @@ try {
   await client.connect(transport);
   const instructions = client.getInstructions();
   assert(instructions);
-  assert.match(instructions, /Prime directive.*provider-confirmed merge/);
-  assert.match(instructions, /Publication alone is not completion/);
+  assert.match(instructions, /Prime directive.*open, green, mergeable MR/);
+  assert.match(instructions, /Never merge it automatically/);
   assert.match(
     instructions,
     /pending work, then started\/published work, then failed\/blocked\/retry work/
@@ -1160,7 +1160,7 @@ try {
   assert(names.includes('omniboard_runner_prepare_next_agentic_run_projects'));
   assert(names.includes('omniboard_runner_prepare_agentic_run_workspace'));
   assert(names.includes('omniboard_runner_finalize_agentic_run_workspace'));
-  assert(names.includes('omniboard_runner_merge_agentic_run'));
+  assert(!names.includes('omniboard_runner_merge_agentic_run'));
   assert(names.includes('omniboard_runner_release_agentic_run_workspace'));
   assert(names.includes('omniboard_runner_report_agentic_run_progress'));
   assert(names.includes('omniboard_runner_report_agentic_run_progress_bulk'));

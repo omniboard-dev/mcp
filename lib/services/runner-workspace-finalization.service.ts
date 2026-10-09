@@ -152,7 +152,7 @@ export async function finalizeRunnerWorkspace(
     mergeRequest,
     progressReports,
     instructions: [
-      'Publication succeeded. The migration is complete only after its MR is merged; inspect CI and continue repairs if needed.',
+      'Publication succeeded. Wait while CI runs; repair failed CI or merge conflicts until the open MR is green and mergeable. Then no agent work remains. Do not merge automatically.',
     ],
   };
 }

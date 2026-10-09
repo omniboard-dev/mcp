@@ -81,7 +81,11 @@ export async function runFreshRetryIntegration(context: any) {
   const unpublishedFix = await prepareNextRunnerProjects({
     runKey: options.runKey,
   });
-  assert.equal(unpublishedFix.summary.prepared, 1);
+  assert.equal(unpublishedFix.summary.prepared, 0);
+  assert.equal(
+    await fs.readFile(dirtyFile, 'utf8'),
+    'local fix still needs publication\n'
+  );
   await fs.unlink(dirtyFile);
   state.projectPipelineStatus = 'success';
   state.projectMergeRequestDetailedStatus = 'not_approved';
@@ -90,6 +94,23 @@ export async function runFreshRetryIntegration(context: any) {
   });
   assert.equal(awaitingApproval.results[0].reason, 'waiting_for_review');
   state.projectMergeRequestDetailedStatus = 'mergeable';
+  const greenHead = await git(localPath, 'rev-parse', 'HEAD');
+  const green = await prepareNextRunnerProjects({ runKey: options.runKey });
+  assert.equal(green.summary.prepared, 0);
+  assert.equal(
+    green.results[0].preparation.continuation.reason,
+    'merge_request_ready'
+  );
+  assert.equal(await git(localPath, 'rev-parse', 'HEAD'), greenHead);
+  await assert.rejects(
+    finalizeRunnerWorkspace({ ...options, localPath }),
+    /Continue according to current provider facts/
+  );
+  assert.equal(await git(localPath, 'rev-parse', 'HEAD'), greenHead);
+  state.projectMergeRequestDetailedStatus = 'conflict';
+  const conflicted = await prepareRunnerWorkspace(options);
+  assert.equal(conflicted.continuation.action, 'continue');
+  assert(conflicted.workspace);
 
   // Missing old-runner metadata means disposable local work, recovered from the MR branch.
   await fs.writeFile(
@@ -180,6 +201,8 @@ export async function runFreshRetryIntegration(context: any) {
   assert.equal(freshPublished.mergeRequest.state, 'opened');
   await releaseAllRunnerExecutions();
   state.projectPipelineStatus = 'success';
+  state.projectMergeRequestState = 'merged';
+  state.projectProgressResolution = 'merged';
   state.mergeRequestSourceHeadSha = freshPublished.commitSha;
   assert.equal(
     (await mergeRunnerChange(options.runKey, options.projectName)).merged,

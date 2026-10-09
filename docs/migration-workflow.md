@@ -10,12 +10,11 @@ implementation milestones; the computed workflow decision controls the next acti
 | Complete | The migration is merged | Stop; leave retained local edits untouched |
 | Dismissed | The migration is no longer required | Stop; close any linked open MR with an explanation |
 | Waiting | No useful work can proceed now | Report the reason and continue another project |
-| Actionable | The agent can advance delivery | Prepare, implement or repair, validate, publish, or merge |
+| Actionable | The agent can advance delivery | Prepare, implement or repair, validate, and publish |
 
 `progress.workflow` contains `outcome`, `reason`, and `instruction`. The API
 and app share the pure decision function. MCP consumes that decision rather than
-reinterpreting progress labels. It adds only local workspace facts and a fresh MR
-check before checkout operations. No database column, enum change, or SQL migration
+reinterpreting progress labels. It checks fresh MR facts before checkout operations. No database column, enum change, or SQL migration
 is required. Existing milestone snapshots remain milestone history; they cannot
 reconstruct historical waiting/actionable outcomes.
 
@@ -72,12 +71,32 @@ flowchart TD
     Dismissed -. Explicit retry .-> Facts
 ```
 
-CI failure or actionable review/conflict feedback normally means actionable.
-Infrastructure-only pipeline failures, unanswered input requests, and unresolved
-external blockers mean waiting. CI/approval waiting is refined in MCP preparation:
-a clean checkout whose synchronized HEAD matches the published source can wait;
-local edits or unpublished synchronization remain actionable. This refinement
-never overrides terminal outcomes or unavailable provider facts.
+Agent work ends when an open MR has successful CI and is mergeable. Keep the
+existing mr_created milestone and return waiting/merge_request_ready; merging
+belongs to the user or consuming team. Running or pending CI also waits. Failed
+CI becomes repair work when no newer pipeline is running. Conflicts or a required
+rebase remain actionable even with green CI: rebase onto the target branch,
+resolve conflicts, validate and push the existing MR. Approval and external
+blockers wait. Infrastructure-only CI failures retain their external-blocker
+classification. Waiting preparation never touches a retained checkout or creates
+new work by rebasing an already-green MR.
+
+```mermaid
+flowchart TD
+    MR[Open MR] --> Conflict{Conflicts or rebase required?}
+    Conflict -- Yes --> Repair[Rebase onto target and resolve conflicts]
+    Conflict -- No --> CI{Current CI}
+    CI -- Running or pending --> Wait[Waiting]
+    CI -- Failed --> Fix[Repair CI failure]
+    CI -- Successful --> Ready{Mergeable?}
+    Ready -- Yes --> Green[Waiting: green mergeable MR]
+    Ready -- Approval or external checks --> Wait
+    Repair --> Verify[Validate and push existing MR]
+    Fix --> Verify
+    Verify --> MR
+    Green -- Later conflict or failed CI --> MR
+    Green -- Human merges --> Complete[Record Merged]
+```
 
 ### Inside actionable
 
@@ -87,7 +106,7 @@ local edits or recreates disposable state from the remote branch/current target.
 Use finalization for publication; do not replay stale whole files via a provider
 commit API. Finalization repeats preparation. A recreated checkout or changed HEAD
 after synchronization, including rebase recovery, returns without publishing so
-the agent can review and rerun checks. Publication is not completion.
+the agent can review and rerun checks. After publication, assess CI and mergeability; do not merge automatically.
 
 ```mermaid
 flowchart TD
@@ -100,9 +119,7 @@ flowchart TD
     Refresh -- Checkout changed --> Validate
     Refresh -- Still actionable and validated --> Publish[Publish or update MR]
     Refresh -- Terminal or waiting --> Assess[Return to assessment]
-    Step -- Ready to merge --> Merge[Request provider merge]
     Publish --> Assess
-    Merge --> Assess
 ```
 
 Dismissal cleanup preserves the dismissed resolution. Comment/closure failures

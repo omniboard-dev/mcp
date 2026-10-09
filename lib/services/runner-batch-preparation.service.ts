@@ -80,7 +80,11 @@ export interface RunnerBatchPreparationProjectResult {
   outcome: 'prepared' | 'waiting' | 'stopped' | 'failed';
   sizeRanking: RunnerBatchProjectSizeRanking;
   preparation?: RunnerWorkspacePrepareResult;
-  reason?: 'preparation_in_progress' | 'waiting_for_ci' | 'waiting_for_review';
+  reason?:
+    | 'preparation_in_progress'
+    | 'waiting_for_ci'
+    | 'waiting_for_review'
+    | 'merge_request_ready';
   error?: string;
 }
 
@@ -203,13 +207,16 @@ export async function prepareNextRunnerProjects(
         outcome,
         sizeRanking,
         preparation,
-        ...(['waiting_for_ci', 'waiting_for_review'].includes(
-          preparation.continuation.reason
-        )
+        ...([
+          'waiting_for_ci',
+          'waiting_for_review',
+          'merge_request_ready',
+        ].includes(preparation.continuation.reason)
           ? {
               reason: preparation.continuation.reason as
                 | 'waiting_for_ci'
-                | 'waiting_for_review',
+                | 'waiting_for_review'
+                | 'merge_request_ready',
             }
           : {}),
       });

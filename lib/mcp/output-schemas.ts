@@ -357,6 +357,7 @@ export const batchPreparationOutputSchema = z
           .enum([
             'preparation_in_progress',
             'waiting_for_ci',
+            'merge_request_ready',
             'waiting_for_review',
           ])
           .optional(),

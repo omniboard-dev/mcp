@@ -881,6 +881,10 @@ function send(response: import('node:http').ServerResponse, body: any) {
         ? 'complete'
         : p.resolution === 'dismissed'
         ? 'dismissed'
+        : p.pipelineStatus === 'success' &&
+          p.mergeRequestDetailedStatus === 'mergeable' &&
+          ['open', 'opened'].includes(p.mergeRequestState)
+        ? 'waiting'
         : p.status === 'pending_retry'
         ? 'actionable'
         : p.pipelineStatus === 'failed'
@@ -895,6 +899,10 @@ function send(response: import('node:http').ServerResponse, body: any) {
         ? 'change_merged'
         : outcome === 'dismissed'
         ? 'change_dismissed'
+        : p.pipelineStatus === 'success' &&
+          p.mergeRequestDetailedStatus === 'mergeable' &&
+          ['open', 'opened'].includes(p.mergeRequestState)
+        ? 'merge_request_ready'
         : p.pipelineStatus === 'running'
         ? 'waiting_for_ci'
         : p.mergeRequestDetailedStatus === 'not_approved'

@@ -18,7 +18,6 @@ import {
   getDefaultBranch,
   getEffectiveRepositoryUrl,
   getHeadCommit,
-  getWorkingTreeStatus,
   getMcpStartupGitIdentity,
   getRemoteBranchCommit,
   isRebaseInProgress,
@@ -103,10 +102,7 @@ async function prepare({
     prompt: run.prompt ?? null,
     result: runResponse.result,
   };
-  const inspectLocalWork = ['waiting_for_ci', 'waiting_for_review'].includes(
-    continuation.reason
-  );
-  if (continuation.action !== 'continue' && !inspectLocalWork) {
+  if (continuation.action !== 'continue') {
     return { ...result, continuation, instructions: continuation.instructions };
   }
   const retained = getActiveRunnerExecution(runKey, projectName);
@@ -240,27 +236,6 @@ async function prepare({
   await writeRunnerState(state);
   const workspaceChanged =
     headBeforeSynchronization !== (await getHeadCommit(localPath)).sha;
-  if (inspectLocalWork) {
-    const unpublished =
-      Boolean(await getWorkingTreeStatus(localPath)) ||
-      state.recovery?.phase !== 'ready_to_push' ||
-      state.preparedHeadSha !== state.recovery?.sourceHeadSha;
-    if (!unpublished)
-      return {
-        ...result,
-        continuation,
-        instructions: continuation.instructions,
-      };
-    continuation = workflowContinuation(
-      {
-        outcome: 'actionable',
-        reason: 'local_unpublished_work',
-        instruction:
-          'Local changes or synchronization still need validation and publication.',
-      },
-      projectState
-    );
-  }
   const progressReport = await reportRunnerAgenticRunProgressSafely(
     runKey,
     projectName,
