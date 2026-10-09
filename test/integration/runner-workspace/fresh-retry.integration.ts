@@ -46,11 +46,12 @@ export async function runFreshRetryIntegration(context: any) {
     runKey: options.runKey,
   });
   assert.equal(dismissedBatch.summary.prepared, 0);
-  state.projectProgressStatus = 'pending_retry';
+  state.projectProgressStatus = 'pending';
   state.projectProgressResolution = null;
   state.projectRetryInstructions = [
     {
       id: 1,
+      disposition: 'accepted',
       instruction: 'Retry this dismissed migration.',
       requestedFromStatus: 'done',
     },
@@ -75,7 +76,7 @@ export async function runFreshRetryIntegration(context: any) {
   });
   assert.equal(awaitingCi.summary.prepared, 0);
   assert.equal(awaitingCi.results[0].reason, 'waiting_for_ci');
-  assert.equal(awaitingCi.results[0].preparation.continuation.action, 'wait');
+  assert.equal(awaitingCi.results[0].outcome, 'waiting');
   const dirtyFile = path.join(localPath, 'pending-ci-fix.txt');
   await fs.writeFile(dirtyFile, 'local fix still needs publication\n');
   const unpublishedFix = await prepareNextRunnerProjects({
@@ -97,10 +98,7 @@ export async function runFreshRetryIntegration(context: any) {
   const greenHead = await git(localPath, 'rev-parse', 'HEAD');
   const green = await prepareNextRunnerProjects({ runKey: options.runKey });
   assert.equal(green.summary.prepared, 0);
-  assert.equal(
-    green.results[0].preparation.continuation.reason,
-    'merge_request_ready'
-  );
+  assert.equal(green.results[0].reason, 'merge_request_ready');
   assert.equal(await git(localPath, 'rev-parse', 'HEAD'), greenHead);
   await assert.rejects(
     finalizeRunnerWorkspace({ ...options, localPath }),

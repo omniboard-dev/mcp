@@ -1,4 +1,9 @@
 #!/usr/bin/env node
+import {
+  readAgenticRunStateTool,
+  refreshAgenticRunStateTool,
+  retryAgenticRunStateTool,
+} from './mcp/tools/agentic-run-state.tools.js';
 
 import { McpServer as McpCliSdkServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
@@ -38,6 +43,10 @@ const mcpCliServer = new McpCliSdkServer(
     ].join('\n\n'),
   }
 );
+
+registerMcpCliTool(mcpCliServer, readAgenticRunStateTool);
+registerMcpCliTool(mcpCliServer, refreshAgenticRunStateTool);
+registerMcpCliTool(mcpCliServer, retryAgenticRunStateTool);
 
 registerMcpCliTool(mcpCliServer, listAgenticRunsTool);
 registerMcpCliTool(mcpCliServer, listAgenticRunProjectsTool);

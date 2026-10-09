@@ -8,32 +8,10 @@ export function getAgenticRunContinuationDecision(
   projectState: AgenticRunProjectState
 ): AgenticRunContinuationDecision {
   const workflow = projectState.progress.workflow;
-  if (!workflow) {
-    return workflowContinuation(
-      {
-        outcome: 'waiting',
-        reason: 'workflow_unavailable',
-        instruction:
-          'The API did not return a workflow decision. Update the API before using this MCP version.',
-      },
-      projectState
+  if (!workflow)
+    throw new Error(
+      'The API workflow contract is missing. Deploy the matching API before this MCP version.'
     );
-  }
-  if (
-    !projectState.providerSync.success &&
-    !['complete', 'dismissed'].includes(workflow.outcome)
-  ) {
-    return workflowContinuation(
-      {
-        outcome: 'waiting',
-        reason: 'provider_sync_failed',
-        instruction:
-          projectState.providerSync.error ||
-          'Provider state could not be refreshed. Do not start or republish migration work.',
-      },
-      projectState
-    );
-  }
   return workflowContinuation(workflow, projectState);
 }
 
@@ -41,16 +19,14 @@ export function workflowContinuation(
   workflow: AgenticRunWorkflowDecision,
   projectState: AgenticRunProjectState
 ): AgenticRunContinuationDecision {
-  const retry = projectState.progress.retryInstructions?.[0];
+  const retry = projectState.progress.retryInstructions?.find(
+    (instruction) => instruction.disposition === 'accepted'
+  );
   return {
     outcome: workflow.outcome,
     action:
-      workflow.outcome === 'actionable'
-        ? 'continue'
-        : workflow.outcome === 'waiting'
-        ? 'wait'
-        : 'stop',
-    reason: workflow.reason as AgenticRunContinuationDecision['reason'],
+      workflow.nextAction === 'prepare' ? 'continue' : workflow.nextAction,
+    reason: workflow.reason,
     instructions: [
       workflow.instruction,
       ...(retry && workflow.outcome === 'actionable'

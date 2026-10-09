@@ -1,28 +1,14 @@
 import {
   AgenticRunMatchedProject,
   AgenticRunProgressStatus,
+  AgenticRunWorkflowDecision,
   RunnerWorkspacePrepareResult,
 } from '../interface.js';
-import { listAgenticRunProjects } from './agentic-runs.service.js';
+import { nextAgenticRunProjects } from './api.service.js';
 import {
   isRunnerWorkspacePreparationInProgress,
   prepareRunnerWorkspace,
 } from './runner-workspace-preparation.service.js';
-
-const DEFAULT_STATUS_GROUPS: AgenticRunProgressStatus[][] = [
-  ['pending'],
-  [
-    'in_progress',
-    'implemented',
-    'verified',
-    'committed',
-    'pushed',
-    'mr_created',
-  ],
-  ['pending_retry', 'failed', 'blocked', 'needs_input'],
-];
-const DEFAULT_LIMIT = 1;
-const MAX_LIMIT = 10;
 
 export interface PrepareNextRunnerProjectsOptions {
   runKey: string;
@@ -80,22 +66,18 @@ export interface RunnerBatchPreparationProjectResult {
   outcome: 'prepared' | 'waiting' | 'stopped' | 'failed';
   sizeRanking: RunnerBatchProjectSizeRanking;
   preparation?: RunnerWorkspacePrepareResult;
-  reason?:
-    | 'preparation_in_progress'
-    | 'waiting_for_ci'
-    | 'waiting_for_review'
-    | 'merge_request_ready';
+  reason?: string;
   error?: string;
 }
 
 export interface RunnerBatchPreparationDependencies {
-  listProjects: typeof listAgenticRunProjects;
+  nextProjects: typeof nextAgenticRunProjects;
   prepareWorkspace: typeof prepareRunnerWorkspace;
   isWorkspacePreparationInProgress: typeof isRunnerWorkspacePreparationInProgress;
 }
 
 const defaultDependencies: RunnerBatchPreparationDependencies = {
-  listProjects: listAgenticRunProjects,
+  nextProjects: nextAgenticRunProjects,
   prepareWorkspace: prepareRunnerWorkspace,
   isWorkspacePreparationInProgress: isRunnerWorkspacePreparationInProgress,
 };
@@ -104,52 +86,12 @@ export async function prepareNextRunnerProjects(
   options: PrepareNextRunnerProjectsOptions,
   dependencies: RunnerBatchPreparationDependencies = defaultDependencies
 ): Promise<RunnerBatchPreparationResult> {
-  const statuses = [
-    ...new Set(options.statuses ?? DEFAULT_STATUS_GROUPS.flat()),
-  ];
-  const limit = options.limit ?? DEFAULT_LIMIT;
-  assertOptions(statuses, limit);
-
-  const discovery = await dependencies.listProjects({
-    runKey: options.runKey,
-    statuses,
-    view: 'full',
-  });
-  const discoveredProjects = discovery.projects.filter(
-    (project) =>
-      project.progress?.status !== 'merged' &&
-      project.progress?.resolution !== 'merged' &&
-      project.progress?.resolution !== 'dismissed' &&
-      project.progress?.status !== 'done' &&
-      (project.targetedByRun || Boolean(project.progress))
-  );
-  const { sourceSelection, projectExtensions } = resolveSourceSelection(
-    options.relevantSourceExtensions,
-    discovery.run?.prompt ?? discovery.check.prompt,
-    discovery.check.description,
-    discoveredProjects
-  );
-  const candidates = discoveredProjects
-    .map((project, index) => ({
-      project,
-      sizeRanking: createProjectSizeRanking(project, projectExtensions[index]),
-    }))
-    .sort((left, right) => {
-      if (options.statuses === undefined) {
-        const priority = (project: AgenticRunMatchedProject) =>
-          DEFAULT_STATUS_GROUPS.findIndex((group) =>
-            group.includes(project.progress?.status ?? 'pending')
-          );
-        const difference = priority(left.project) - priority(right.project);
-        if (difference) return difference;
-      }
-      return compareRankedProjects(left, right);
-    });
-  sourceSelection.projectsWithSize = candidates.filter(
-    ({ sizeRanking }) => sizeRanking.metadataAvailable
-  ).length;
-  sourceSelection.projectsWithoutSize =
-    candidates.length - sourceSelection.projectsWithSize;
+  const limit = options.limit ?? 1;
+  let selection = await dependencies.nextProjects(options);
+  const statuses = selection.requestedStatuses;
+  const sourceSelection = selection.sourceSelection;
+  const candidatesTotal = selection.candidatesTotal;
+  const excluded = new Set<string>();
   const summary = {
     prepared: 0,
     waiting: 0,
@@ -157,11 +99,37 @@ export async function prepareNextRunnerProjects(
     failed: 0,
   };
   const results: RunnerBatchPreparationProjectResult[] = [];
+  const recordAssessments = () => {
+    for (const assessment of selection.assessments) {
+      if (assessment.workflow.nextAction === 'prepare') continue;
+      const outcome =
+        assessment.workflow.nextAction === 'wait' ? 'waiting' : 'stopped';
+      summary[outcome]++;
+      results.push({
+        projectName: assessment.projectName,
+        initialStatus: assessment.initialStatus,
+        sizeRanking: assessment.sizeRanking,
+        outcome,
+        reason: assessment.workflow.reason,
+      });
+    }
+  };
+  recordAssessments();
   let nextCandidateIndex = 0;
-
-  while (nextCandidateIndex < candidates.length && summary.prepared < limit) {
-    const { project, sizeRanking } = candidates[nextCandidateIndex];
-    nextCandidateIndex += 1;
+  while (summary.prepared < limit) {
+    if (nextCandidateIndex >= selection.candidates.length) {
+      selection.examined.forEach((name) => excluded.add(name));
+      if (!selection.hasMore) break;
+      selection = await dependencies.nextProjects({
+        ...options,
+        limit: limit - summary.prepared,
+        excludeProjectNames: [...excluded],
+      });
+      recordAssessments();
+      nextCandidateIndex = 0;
+      continue;
+    }
+    const { project, sizeRanking } = selection.candidates[nextCandidateIndex++];
     const initialStatus = project.progress?.status ?? 'pending';
 
     const unavailableReason = dependencies.isWorkspacePreparationInProgress(
@@ -236,259 +204,30 @@ export async function prepareNextRunnerProjects(
     runKey: options.runKey,
     requestedStatuses: statuses,
     requestedLimit: limit,
-    candidatesTotal: candidates.length,
+    candidatesTotal,
     examined: results.length,
-    hasMore: nextCandidateIndex < candidates.length,
+    hasMore:
+      nextCandidateIndex < selection.candidates.length || selection.hasMore,
     sourceSelection,
     summary,
     results,
   };
 }
 
-function resolveSourceSelection(
-  requestedExtensions: string[] | undefined,
-  prompt: string | null | undefined,
-  description: string | null | undefined,
-  projects: AgenticRunMatchedProject[]
-): ResolvedRunnerBatchSourceSelection {
-  if (requestedExtensions !== undefined) {
-    if (
-      requestedExtensions.length === 0 ||
-      requestedExtensions.some(
-        (extension) => normalizeExtension(extension) === undefined
-      )
-    ) {
-      throw new Error(
-        'Relevant source extensions must contain only valid file extensions.'
-      );
-    }
-    const extensions = normalizeExtensions(requestedExtensions);
-    return {
-      sourceSelection: {
-        extensions,
-        origin: 'explicit',
-        projectsWithSize: 0,
-        projectsWithoutSize: 0,
-      },
-      projectExtensions: projects.map(() => extensions),
-    };
-  }
-
-  const promptExtensions = normalizeExtensions(
-    extractPromptExtensions([prompt, description].filter(Boolean).join(' '))
-  );
-  const projectExtensions = projects.map((project) => {
-    const projectSize = project.projectSize?.source ?? project.projectSize;
-    const availableExtensions = new Set(
-      normalizeExtensions(
-        projectSize
-          ? [
-              ...Object.keys(projectSize.byExtension),
-              ...Object.keys(projectSize.linesByExtension),
-            ]
-          : []
-      )
-    );
-    return normalizeExtensions([
-      ...promptExtensions,
-      ...extractResultExtensions(project.result, availableExtensions),
-    ]);
-  });
-  const inferredExtensions = normalizeExtensions(projectExtensions.flat());
-
-  return {
-    sourceSelection: {
-      extensions: inferredExtensions,
-      origin:
-        inferredExtensions.length > 0
-          ? 'prompt_and_results'
-          : 'total_project_fallback',
-      projectsWithSize: 0,
-      projectsWithoutSize: 0,
-    },
-    projectExtensions,
-  };
-}
-
-function createProjectSizeRanking(
-  project: AgenticRunMatchedProject,
-  relevantExtensions: string[]
-): RunnerBatchProjectSizeRanking {
-  const projectSize = project.projectSize?.source ?? project.projectSize;
-  if (!projectSize) {
-    return {
-      metadataAvailable: false,
-      relevantExtensions: [...relevantExtensions],
-      relevantLines: null,
-      relevantFiles: null,
-      totalLines: null,
-      totalFiles: null,
-    };
-  }
-
-  const selectedExtensions = relevantExtensions.length
-    ? relevantExtensions
-    : Object.keys(projectSize.linesByExtension);
-
-  return {
-    metadataAvailable: true,
-    relevantExtensions: [...selectedExtensions],
-    relevantLines: selectedExtensions.reduce(
-      (total, extension) =>
-        total + (projectSize.linesByExtension[extension] ?? 0),
-      0
-    ),
-    relevantFiles: selectedExtensions.reduce(
-      (total, extension) => total + (projectSize.byExtension[extension] ?? 0),
-      0
-    ),
-    totalLines: projectSize.totalLines,
-    totalFiles: projectSize.totalFiles,
-  };
-}
-
-function compareRankedProjects(
-  left: {
+export interface RunnerProjectSelection {
+  assessments: {
+    projectName: string;
+    initialStatus: AgenticRunProgressStatus;
+    workflow: AgenticRunWorkflowDecision;
+    sizeRanking: RunnerBatchProjectSizeRanking;
+  }[];
+  candidates: {
     project: AgenticRunMatchedProject;
     sizeRanking: RunnerBatchProjectSizeRanking;
-  },
-  right: {
-    project: AgenticRunMatchedProject;
-    sizeRanking: RunnerBatchProjectSizeRanking;
-  }
-) {
-  if (
-    left.sizeRanking.metadataAvailable !== right.sizeRanking.metadataAvailable
-  ) {
-    return left.sizeRanking.metadataAvailable ? -1 : 1;
-  }
-
-  for (const key of [
-    'totalLines',
-    'totalFiles',
-    'relevantLines',
-    'relevantFiles',
-  ] as const) {
-    const difference =
-      (left.sizeRanking[key] ?? Number.MAX_SAFE_INTEGER) -
-      (right.sizeRanking[key] ?? Number.MAX_SAFE_INTEGER);
-    if (difference !== 0) {
-      return difference;
-    }
-  }
-
-  return left.project.name.localeCompare(right.project.name);
-}
-
-const PROMPT_EXTENSION_KEYWORDS: ReadonlyArray<
-  readonly [RegExp, readonly string[]]
-> = [
-  [/\bjson\b/i, ['json']],
-  [/\byaml\b/i, ['yaml', 'yml']],
-  [/\btypescript\b/i, ['ts', 'tsx']],
-  [/\bjavascript\b/i, ['js', 'jsx', 'mjs', 'cjs']],
-  [/\bhtml\b/i, ['html']],
-  [/\bcss\b/i, ['css', 'scss', 'sass', 'less']],
-  [/\bjava\b/i, ['java']],
-  [/\bkotlin\b/i, ['kt', 'kts']],
-  [/\bpython\b/i, ['py']],
-  [/\brust\b/i, ['rs']],
-  [/\bgolang\b/i, ['go']],
-];
-
-function extractPromptExtensions(text: string) {
-  const extensions = extractFileLikeExtensions(text);
-  for (const [pattern, matchingExtensions] of PROMPT_EXTENSION_KEYWORDS) {
-    if (pattern.test(text)) {
-      extensions.push(...matchingExtensions);
-    }
-  }
-  return extensions;
-}
-
-function extractResultExtensions(
-  value: unknown,
-  availableExtensions: Set<string>,
-  filePathContext = false
-): string[] {
-  if (typeof value === 'string') {
-    if (!filePathContext) {
-      return [];
-    }
-    return normalizeExtensions(extractFileLikeExtensions(value)).filter(
-      (extension) =>
-        availableExtensions.size === 0 || availableExtensions.has(extension)
-    );
-  }
-  if (Array.isArray(value)) {
-    return value.flatMap((item) =>
-      extractResultExtensions(item, availableExtensions, filePathContext)
-    );
-  }
-  if (!value || typeof value !== 'object') {
-    return [];
-  }
-  return Object.entries(value).flatMap(([key, child]) =>
-    extractResultExtensions(
-      child,
-      availableExtensions,
-      filePathContext || isResultFilePathContextKey(key)
-    )
-  );
-}
-
-function isResultFilePathContextKey(key: string) {
-  const segments = key
-    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
-    .split(/[^a-z0-9]+/i)
-    .map((segment) => segment.toLowerCase());
-  return segments.some((segment) =>
-    /^(?:files?|paths?|sources?|targets?)$/.test(segment)
-  );
-}
-
-function extractFileLikeExtensions(text: string) {
-  const textWithUrlPathnames = text.replace(
-    /\b[a-z][a-z0-9+.-]*:\/\/[^\s<>"']+/gi,
-    (url) => {
-      try {
-        return new URL(url).pathname;
-      } catch {
-        return ' ';
-      }
-    }
-  );
-  return [
-    ...textWithUrlPathnames.matchAll(
-      /(?:^|[\\/\w@.-])\.([a-z][a-z0-9+-]{0,15})(?=$|[^a-z0-9+.-])/gi
-    ),
-  ].map((match) => match[1]);
-}
-
-function normalizeExtensions(extensions: string[]) {
-  const normalized = extensions
-    .map(normalizeExtension)
-    .filter((extension): extension is string => Boolean(extension));
-  return [...new Set(normalized)];
-}
-
-function normalizeExtension(value: string) {
-  const trimmed = value.trim().toLowerCase();
-  if (trimmed === '[none]') {
-    return trimmed;
-  }
-  const pathExtension = trimmed.match(/\.([a-z][a-z0-9+-]{0,15})$/)?.[1];
-  const extension = pathExtension ?? trimmed.replace(/^\*?\./, '');
-  return /^[a-z][a-z0-9+-]{0,15}$/.test(extension) ? extension : undefined;
-}
-
-function assertOptions(statuses: AgenticRunProgressStatus[], limit: number) {
-  if (statuses.length === 0) {
-    throw new Error('At least one project progress status is required.');
-  }
-  if (!Number.isInteger(limit) || limit < 1 || limit > MAX_LIMIT) {
-    throw new Error(
-      `Batch preparation limit must be an integer between 1 and ${MAX_LIMIT}.`
-    );
-  }
+  }[];
+  examined: string[];
+  candidatesTotal: number;
+  hasMore: boolean;
+  requestedStatuses: AgenticRunProgressStatus[];
+  sourceSelection: RunnerBatchSourceSelection;
 }

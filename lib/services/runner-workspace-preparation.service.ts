@@ -138,12 +138,16 @@ async function prepare({
       mr.state.toLowerCase() === 'merged'
         ? {
             outcome: 'complete',
+            nextAction: 'stop',
+            maintenance: [],
             reason: 'change_merged',
             instruction:
               'The change is already merged. Leave retained local work untouched.',
           }
         : {
             outcome: 'waiting',
+            nextAction: 'wait',
+            maintenance: [],
             reason: 'waiting_for_provider_activity',
             instruction: 'The provider is rebasing this MR. Retry later.',
           },

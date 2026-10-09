@@ -168,9 +168,9 @@ Reported progress statuses are:
 - `needs_input`: the check still matches.
 - `failed`: analyzer validation failed.
 
-Projects explicitly returned by a user for another attempt use
-`pending_retry`. The latest immutable retry instruction is included in the
-prepared workspace instructions, and MCP reports `in_progress` only after the
+Explicit retries create an instruction with a separate disposition. The API
+reassesses current applicability and provider facts; only accepted guidance is
+included in prepared workspace instructions. MCP reports `in_progress` only after the
 workspace is successfully acquired and prepared. Every matched-project response
 includes fulfilled, unfulfilled, and unchecked projects. Each project carries
 its current fulfillment group so the run prompt can add, remove, or otherwise
@@ -381,9 +381,21 @@ Use the tools in this order:
 
 1. List runs and projects for read-only discovery and candidate selection.
 2. Prepare one selected project, or call the batch preparation tool when ready
-   to acquire work. Preparation refreshes only the selected candidates before
-   deciding whether work can continue.
+   to acquire work. The API handles pending retry assessments and dismissed-MR
+   cleanup independently, then refreshes candidates before authorizing work.
 3. List again only when an updated stored overview is needed after preparation.
+
+#### Project state and retry tools
+
+- `omniboard_runner_get_project_state`: read stored facts and the API decision.
+- `omniboard_runner_refresh_project_state`: refresh provider facts and reconcile
+  applicability, retries, and dismissal cleanup without preparing a checkout.
+- `omniboard_runner_request_project_retry`: record explicit operator guidance for
+  reassessment; it does not force work on a ready MR.
+
+This release requires the matching API and manual database migration described in
+[the workflow contract](docs/migration-workflow.md). Missing API workflow decisions
+are contract errors; MCP does not derive a fallback decision.
 
 #### `omniboard_runner_prepare_next_agentic_run_projects`
 
@@ -393,7 +405,7 @@ Prepare up to `limit` actionable migrations (default one, maximum ten). For
 1. Pending projects, including those without stored progress.
 2. Started or published work: in_progress, implemented, verified, committed,
    pushed, mr_created.
-3. Recovery work: pending_retry, failed, blocked, needs_input.
+3. Recovery work: failed, blocked, needs_input.
 
 Merged and dismissed migrations are excluded. Request an explicit retry to
 reconsider dismissed work; progress reports cannot reopen terminal migrations.

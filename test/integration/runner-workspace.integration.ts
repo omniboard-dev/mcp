@@ -314,6 +314,47 @@ try {
     }
 
     if (
+      request.method === 'POST' &&
+      url.pathname === '/mcp-cli/next-projects'
+    ) {
+      const project = matchedProject(
+        state.projectFulfillment,
+        state.projectMatchesCheck
+      );
+      const workflow = applyWorkflow(project.progress);
+      const sizeRanking = {
+        metadataAvailable: false,
+        relevantExtensions: [],
+        relevantLines: null,
+        relevantFiles: null,
+        totalLines: null,
+        totalFiles: null,
+      };
+      return send(response, {
+        candidates:
+          workflow.nextAction === 'prepare' ? [{ project, sizeRanking }] : [],
+        assessments: [
+          {
+            projectName: project.name,
+            initialStatus: project.progress.status,
+            workflow,
+            sizeRanking,
+          },
+        ],
+        examined: [project.name],
+        candidatesTotal: 1,
+        hasMore: false,
+        requestedStatuses: ['pending', 'mr_created', 'failed'],
+        sourceSelection: {
+          extensions: [],
+          origin: 'total_project_fallback',
+          projectsWithSize: 0,
+          projectsWithoutSize: 1,
+        },
+      });
+    }
+
+    if (
       request.method === 'GET' &&
       url.pathname === '/mcp-cli/matched-projects'
     ) {
@@ -874,51 +915,7 @@ async function readJsonBody(
 }
 
 function send(response: import('node:http').ServerResponse, body: any) {
-  if (body?.progress && body?.providerSync) {
-    const p = body.progress;
-    const outcome =
-      p.resolution === 'merged' || p.mergeRequestState === 'merged'
-        ? 'complete'
-        : p.resolution === 'dismissed'
-        ? 'dismissed'
-        : p.pipelineStatus === 'success' &&
-          p.mergeRequestDetailedStatus === 'mergeable' &&
-          ['open', 'opened'].includes(p.mergeRequestState)
-        ? 'waiting'
-        : p.status === 'pending_retry'
-        ? 'actionable'
-        : p.pipelineStatus === 'failed'
-        ? 'actionable'
-        : p.pipelineStatus === 'running'
-        ? 'waiting'
-        : p.mergeRequestDetailedStatus === 'not_approved'
-        ? 'waiting'
-        : 'actionable';
-    const reason =
-      outcome === 'complete'
-        ? 'change_merged'
-        : outcome === 'dismissed'
-        ? 'change_dismissed'
-        : p.pipelineStatus === 'success' &&
-          p.mergeRequestDetailedStatus === 'mergeable' &&
-          ['open', 'opened'].includes(p.mergeRequestState)
-        ? 'merge_request_ready'
-        : p.pipelineStatus === 'running'
-        ? 'waiting_for_ci'
-        : p.mergeRequestDetailedStatus === 'not_approved'
-        ? 'waiting_for_review'
-        : 'active_work';
-    p.workflow = {
-      outcome,
-      reason,
-      instruction:
-        outcome === 'complete'
-          ? 'The change is already merged.'
-          : outcome === 'dismissed'
-          ? 'Explicit retry required.'
-          : 'Continue according to current provider facts.',
-    };
-  }
+  if (body?.progress && body?.providerSync) applyWorkflow(body.progress);
   response.end(JSON.stringify(body));
 }
 
@@ -926,4 +923,55 @@ function getServerPort(server: import('node:http').Server) {
   const address = server.address();
   assert(address && typeof address !== 'string');
   return address.port;
+}
+
+function applyWorkflow(p: any) {
+  const outcome =
+    p.resolution === 'merged' || p.mergeRequestState === 'merged'
+      ? 'complete'
+      : p.resolution === 'dismissed'
+      ? 'dismissed'
+      : p.pipelineStatus === 'success' &&
+        p.mergeRequestDetailedStatus === 'mergeable' &&
+        ['open', 'opened'].includes(p.mergeRequestState)
+      ? 'waiting'
+      : p.pipelineStatus === 'failed'
+      ? 'actionable'
+      : p.pipelineStatus === 'running'
+      ? 'waiting'
+      : p.mergeRequestDetailedStatus === 'not_approved'
+      ? 'waiting'
+      : 'actionable';
+  const reason =
+    outcome === 'complete'
+      ? 'change_merged'
+      : outcome === 'dismissed'
+      ? 'change_dismissed'
+      : p.pipelineStatus === 'success' &&
+        p.mergeRequestDetailedStatus === 'mergeable' &&
+        ['open', 'opened'].includes(p.mergeRequestState)
+      ? 'merge_request_ready'
+      : p.pipelineStatus === 'running'
+      ? 'waiting_for_ci'
+      : p.mergeRequestDetailedStatus === 'not_approved'
+      ? 'waiting_for_review'
+      : 'active_work';
+  p.workflow = {
+    nextAction:
+      outcome === 'actionable'
+        ? 'prepare'
+        : outcome === 'waiting'
+        ? 'wait'
+        : 'stop',
+    maintenance: [],
+    outcome,
+    reason,
+    instruction:
+      outcome === 'complete'
+        ? 'The change is already merged.'
+        : outcome === 'dismissed'
+        ? 'Explicit retry required.'
+        : 'Continue according to current provider facts.',
+  };
+  return p.workflow;
 }

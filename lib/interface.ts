@@ -251,7 +251,6 @@ export type AgenticRunStatus = (typeof AGENTIC_RUN_STATUS_VALUES)[number];
 
 export const AGENTIC_RUN_PROGRESS_STATUS_VALUES = [
   'pending',
-  'pending_retry',
   'in_progress',
   'implemented',
   'needs_input',
@@ -260,8 +259,6 @@ export const AGENTIC_RUN_PROGRESS_STATUS_VALUES = [
   'pushed',
   'mr_created',
   'done',
-  // Backward compatibility for clients and rows created before done + resolution.
-  'merged',
   'blocked',
   'failed',
 ] as const;
@@ -271,7 +268,6 @@ export type AgenticRunProgressStatus =
 
 export const AGENTIC_RUN_REPORTABLE_PROGRESS_STATUS_VALUES = [
   'pending',
-  'pending_retry',
   'in_progress',
   'implemented',
   'needs_input',
@@ -280,7 +276,6 @@ export const AGENTIC_RUN_REPORTABLE_PROGRESS_STATUS_VALUES = [
   'pushed',
   'mr_created',
   'done',
-  'merged',
   'blocked',
   'failed',
 ] as const satisfies readonly AgenticRunProgressStatus[];
@@ -326,13 +321,15 @@ export interface AgenticRunProviderSnapshot {
 }
 
 export interface AgenticRunWorkflowDecision {
+  nextAction: 'stop' | 'wait' | 'prepare';
+  maintenance: ('assess_retry' | 'close_dismissed_mr' | 'refresh_provider')[];
   outcome: 'complete' | 'dismissed' | 'waiting' | 'actionable';
   reason: string;
   instruction: string;
 }
 
 export interface AgenticRunProjectProgress {
-  workflow?: AgenticRunWorkflowDecision;
+  workflow: AgenticRunWorkflowDecision;
   status: AgenticRunProgressStatus;
   resolution?: AgenticRunResolution | null;
   resolutionReason?: string | null;
@@ -353,6 +350,14 @@ export interface AgenticRunProjectProgress {
 }
 
 export interface AgenticRunRetryInstruction {
+  disposition:
+    | 'pending'
+    | 'accepted'
+    | 'consumed'
+    | 'no_work'
+    | 'excluded'
+    | 'superseded';
+  dispositionReason?: string | null;
   id: number;
   instruction: string;
   requestedFromStatus: AgenticRunProgressStatus;
@@ -386,30 +391,7 @@ export interface AgenticRunProjectState {
 
 export type AgenticRunContinuationAction = 'continue' | 'wait' | 'stop';
 
-export type AgenticRunContinuationReason =
-  | 'merge_request_ready'
-  | 'waiting_for_ci'
-  | 'waiting_for_review'
-  | 'needs_input'
-  | 'blocked'
-  | 'completion_unconfirmed'
-  | 'workflow_unavailable'
-  | 'local_unpublished_work'
-  | 'active_work'
-  | 'actionable_merge_block'
-  | 'actionable_review_feedback'
-  | 'automatic_rebase_requested'
-  | 'application_pipeline_failure'
-  | 'change_completed'
-  | 'change_dismissed'
-  | 'change_merged'
-  | 'infrastructure_pipeline_failure'
-  | 'operator_retry_requested'
-  | 'provider_sync_failed'
-  | 'result_not_targeted'
-  | 'retry_failed_work'
-  | 'unsupported_progress_status'
-  | 'waiting_for_provider_activity';
+export type AgenticRunContinuationReason = string;
 
 export interface AgenticRunPipelineRetryResult {
   attempted: boolean;

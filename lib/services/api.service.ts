@@ -206,13 +206,19 @@ export const refreshAgenticRunProjectState = (
 export const applyAgenticRunProjectProviderSnapshot = (
   runKey: string,
   projectName: string,
-  snapshot: AgenticRunProviderSnapshot
+  snapshot: AgenticRunProviderSnapshot,
+  expectedVersion: number
 ): Promise<AgenticRunProjectState> =>
   request<AgenticRunProjectState>(
     MCP_CLI_RUN_PROJECT_PROVIDER_SNAPSHOT_ENDPOINT,
     {
       method: 'POST',
-      body: JSON.stringify({ runKey, projectName, ...snapshot }),
+      body: JSON.stringify({
+        runKey,
+        projectName,
+        ...snapshot,
+        expectedVersion,
+      }),
     }
   );
 
@@ -340,7 +346,7 @@ async function verifyBulkProgress(
           index,
           runKey,
           projectName: item.projectName,
-          expectedStatus: normalizeReportedStatus(item.status!),
+          expectedStatus: item.status!,
           actualStatus: null,
           verificationError,
         }))
@@ -355,7 +361,7 @@ async function verifyBulkProgress(
       ])
     );
     for (const { index, item } of runItems) {
-      const expectedStatus = normalizeReportedStatus(item.status!);
+      const expectedStatus = item.status!;
       const actualStatus = statusByProject.get(item.projectName) ?? null;
       const result = results.find((candidate) => candidate.index === index);
       if (actualStatus === expectedStatus) {
@@ -399,12 +405,6 @@ async function verifyBulkProgress(
   }
 
   return { verifiedCount, recoveredCount, regressedCount, residuals };
-}
-
-function normalizeReportedStatus(
-  status: NonNullable<AgenticRunProgressUpsertInput['status']>
-) {
-  return status === 'merged' ? 'done' : status;
 }
 
 function isAmbiguousBulkRequestFailure(error: unknown) {
@@ -751,3 +751,33 @@ function normalizeMatchedProject(
     targetedByRun: project.targetedByRun ?? false,
   };
 }
+
+export const nextAgenticRunProjects = (
+  options: import('./runner-batch-preparation.service.js').PrepareNextRunnerProjectsOptions & {
+    excludeProjectNames?: string[];
+  }
+): Promise<
+  import('./runner-batch-preparation.service.js').RunnerProjectSelection
+> =>
+  request('/mcp-cli/next-projects', {
+    method: 'POST',
+    body: JSON.stringify(options),
+    timeoutMs: 180_000,
+  });
+
+export const readAgenticRunProjectState = (
+  runKey: string,
+  projectName: string
+) =>
+  request(
+    '/mcp-cli/run-project-state?' + new URLSearchParams({ runKey, projectName })
+  );
+export const requestAgenticRunRetry = (
+  runKey: string,
+  projectName: string,
+  instruction: string
+) =>
+  request('/mcp-cli/run-project-state/retry', {
+    method: 'POST',
+    body: JSON.stringify({ runKey, projectName, instruction }),
+  });

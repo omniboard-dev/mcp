@@ -12,16 +12,19 @@ implementation milestones; the computed workflow decision controls the next acti
 | Waiting | No useful work can proceed now | Report the reason and continue another project |
 | Actionable | The agent can advance delivery | Prepare, implement or repair, validate, and publish |
 
-`progress.workflow` contains `outcome`, `reason`, and `instruction`. The API
-and app share the pure decision function. MCP consumes that decision rather than
-reinterpreting progress labels. It checks fresh MR facts before checkout operations. No database column, enum change, or SQL migration
-is required. Existing milestone snapshots remain milestone history; they cannot
-reconstruct historical waiting/actionable outcomes.
+`progress.workflow` contains `outcome`, `reason`, `instruction`, `nextAction`, and
+`maintenance`. The API owns the evaluator and candidate selection; the dashboard
+and MCP consume its decisions. MCP checks fresh facts before checkout operations.
+This release requires a manual SQL migration followed by matching API/app and MCP
+versions. Existing milestone snapshots remain milestone history.
+
+The authoritative [state contract and detailed lifecycle charts](https://github.com/omniboard-dev/omniboard/blob/main/docs/runbooks/agentic-runner-state-model.md)
+cover ownership, transitions, retries, reconciliation, and the manual cutover.
 
 ### Continue loop
 
-`continue` selects pending projects first, started/published work second, and
-failed/blocked/needs-input/pending-retry work third, smallest source size first
+The API selects pending projects first, started/published work second, and
+failed/blocked/needs-input work third, smallest source size first
 within each group. Explicit status filters override that ordering. Complete and
 dismissed records are excluded, including when a status filter includes done.
 Waiting, stopped and failed preparations do not consume the actionable batch limit.
@@ -29,12 +32,12 @@ An empty batch is not proof that all migrations merged.
 
 ```mermaid
 flowchart TD
-    Start[Continue migration] --> Select[Select next unfinished candidate]
+    Start[Continue migration] --> Maintain[Assess retries and reconcile dismissed cleanup]
+    Maintain --> Select[API selects next unfinished candidate]
     Select --> Assess[Refresh facts and assess]
     Assess --> Outcome{Outcome}
     Outcome -- Complete --> Next[Next candidate]
-    Outcome -- Dismissed --> Cleanup[Close linked open MR with explanation]
-    Cleanup --> Next
+    Outcome -- Dismissed --> Next
     Outcome -- Waiting --> Defer[Report reason and revisit later]
     Defer --> Next
     Outcome -- Actionable --> Execute[Execute next useful step]
@@ -46,9 +49,9 @@ flowchart TD
 
 Merged evidence takes precedence over local files and old progress labels.
 Dismissed is terminal until an explicit retry clears the resolution through the
-existing retry endpoint. A progress report cannot reopen a terminal migration or
-replace its MR. A done record without a resolution waits for clarification; it is
-not automatically treated as merged.
+retry assessment. A progress report cannot reopen a terminal migration or
+replace its MR. Milestones alone never establish completion; the SQL cutover
+normalizes historical ambiguous records once.
 
 No recorded MR is normal for new work. A failed lookup of a recorded MR, or failed
 discovery, leaves required provider facts unknown and prevents migration work.
@@ -87,13 +90,17 @@ flowchart TD
     Conflict -- Yes --> Repair[Rebase onto target and resolve conflicts]
     Conflict -- No --> CI{Current CI}
     CI -- Running or pending --> Wait[Waiting]
-    CI -- Failed --> Fix[Repair CI failure]
+    CI -- Application failure --> Fix[Repair CI failure]
+    CI -- Infrastructure failure --> Wait
+    CI -- Unknown or absent --> Wait
     CI -- Successful --> Ready{Mergeable?}
     Ready -- Yes --> Green[Waiting: green mergeable MR]
-    Ready -- Approval or external checks --> Wait
+    Ready -- Concrete review or draft repair --> Fix
+    Ready -- Approval, external checks, or unknown --> Wait
     Repair --> Verify[Validate and push existing MR]
     Fix --> Verify
     Verify --> MR
+    Wait -- Next refresh after provider or operator event --> MR
     Green -- Later conflict or failed CI --> MR
     Green -- Human merges --> Complete[Record Merged]
 ```
@@ -130,12 +137,21 @@ Discovery never substitutes a new MR for a terminal record.
 Replacing an unfinished MR clears the old provider identity, pipeline evidence,
 and completion timestamps.
 
-### Deployment and compatibility
+### Deployment contract
 
-Deploy the API before releasing the updated MCP. A missing workflow decision
-returns waiting with an API-update instruction; MCP must not guess the outcome.
-Existing action values continue/wait/stop remain in tool responses alongside the
-four-outcome decision for compatibility. The dashboard shows the four current
-outcomes with milestone details below, while its historical chart retains the
-existing milestone categories. No database access or schema synchronization is
-part of this change.
+Run the manual SQL cutover with API/runner writers stopped, then deploy the matching
+API/app before using this MCP release. A missing workflow decision is a contract
+error; there is no runtime legacy-state conversion or fallback classifier.
+The action values continue/wait/stop map directly from the API next action.
+
+Retry dispositions are pending, accepted, consumed, no_work, excluded, and
+superseded. Pending assessment suspends dismissal cleanup. A ready or merged MR
+settles unneeded guidance as no_work; accepted guidance is consumed with the next
+runner report. Provider refresh preserves explicit human holds. An explicit retry
+releases the hold and asks the API to reassess current facts.
+
+Read-only list/state calls do not reconcile or write. Explicit refresh, preparation,
+and batch selection invoke reconciliation. Dashboard initial load reconciles
+applicability and cleanup; dashboard refresh also observes providers. There is no
+new background polling service. External waits require their named owner/event and
+a refresh; they do not authorize application changes.

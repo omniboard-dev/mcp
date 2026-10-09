@@ -50,15 +50,18 @@ assert.equal(
 const pendingRetryContinuation = getAgenticRunContinuationDecision({
   project: { currentlyMatchesCheck: true },
   progress: {
-    status: 'pending_retry',
+    status: 'pending',
     workflow: {
       outcome: 'actionable',
+      nextAction: 'prepare',
+      maintenance: [],
       reason: 'operator_retry_requested',
       instruction: 'Reassess the migration.',
     },
     retryInstructions: [
       {
         id: 1,
+        disposition: 'accepted',
         instruction: 'Reuse the existing parser.',
         requestedFromStatus: 'failed',
         requestedBy: { id: 7, firstname: 'Tomas', lastname: 'Trajan' },
@@ -76,30 +79,37 @@ assert(
   )
 );
 
-for (const [workflow, syncSuccess, expected] of [
-  [undefined, true, 'waiting'],
-  [
-    { outcome: 'actionable', reason: 'active_work', instruction: 'Work' },
-    false,
-    'waiting',
-  ],
-  [
-    { outcome: 'dismissed', reason: 'change_dismissed', instruction: 'Stop' },
-    true,
-    'dismissed',
-  ],
-  [
-    { outcome: 'complete', reason: 'change_merged', instruction: 'Stop' },
-    true,
-    'complete',
-  ],
+assert.throws(
+  () =>
+    getAgenticRunContinuationDecision({
+      progress: {},
+      providerSync: { success: true, diagnostics: [] },
+    } as any),
+  /workflow contract is missing/
+);
+for (const [outcome, nextAction] of [
+  ['actionable', 'prepare'],
+  ['waiting', 'wait'],
+  ['dismissed', 'stop'],
+  ['complete', 'stop'],
 ] as const) {
   const decision = getAgenticRunContinuationDecision({
-    progress: { workflow },
-    providerSync: { success: syncSuccess, diagnostics: [] },
+    progress: {
+      workflow: {
+        outcome,
+        nextAction,
+        maintenance: [],
+        reason: 'server_decision',
+        instruction: 'Server instruction',
+      },
+    },
+    providerSync: { success: true, diagnostics: [] },
   } as any);
-  assert.equal(decision.outcome, expected);
-  assert.notEqual(decision.action, 'continue');
+  assert.equal(decision.outcome, outcome);
+  assert.equal(
+    decision.action,
+    nextAction === 'prepare' ? 'continue' : nextAction
+  );
 }
 
 const run = {
@@ -110,87 +120,6 @@ const run = {
   status: 'active',
   isActive: true,
 };
-const retryDiscoveryRequests: any[] = [];
-const unfulfilledRetryProject = project(
-  'project-unfulfilled-retry',
-  'pending_retry',
-  {},
-  'unfulfilled'
-);
-const nonTargetedRetryProject = {
-  ...project('a-project-non-targeted', 'done', { resolution: 'dismissed' }),
-  targetedByRun: false,
-};
-const unfulfilledRetryBatch = await prepareNextRunnerProjects(
-  { runKey: run.runKey, statuses: ['pending_retry', 'done'], limit: 1 },
-  {
-    listProjects: async (options) => {
-      retryDiscoveryRequests.push(options);
-      return createAgenticRunProjectList(
-        {
-          check: {
-            name: 'icon-registry',
-            type: 'regex',
-            description: null,
-            agentic: true,
-            prompt: 'Large migration prompt',
-          },
-          run,
-          runs: [run],
-          projects: [nonTargetedRetryProject, unfulfilledRetryProject],
-          total: 2,
-          totalsByFulfillment: fulfillmentTotals({
-            fulfilled: 1,
-            unfulfilled: 1,
-          }),
-        },
-        {
-          statuses: options.statuses,
-          view: options.view,
-        }
-      );
-    },
-    isWorkspacePreparationInProgress: () => false,
-    hasActiveExecutionLease: () => false,
-    prepareWorkspace: async ({ projectName }) => ({
-      run,
-      project: unfulfilledRetryProject,
-      projectState: {
-        run,
-        project: {
-          id: unfulfilledRetryProject.id,
-          name: projectName,
-          currentlyMatchesCheck: false,
-          fulfillment: 'unfulfilled',
-        },
-        progress: unfulfilledRetryProject.progress,
-        providerSync: {
-          attempted: true,
-          success: true,
-          error: null,
-          diagnostics: [],
-        },
-      },
-      continuation: {
-        action: 'stop' as const,
-        reason: 'change_dismissed' as const,
-        instructions: [],
-        diagnostics: [],
-      },
-      prompt: run.prompt,
-      instructions: [],
-    }),
-  }
-);
-assert.equal(retryDiscoveryRequests.length, 1);
-assert.deepEqual(retryDiscoveryRequests[0].statuses, ['pending_retry', 'done']);
-assert.equal(unfulfilledRetryBatch.candidatesTotal, 1);
-assert.equal(
-  unfulfilledRetryBatch.results[0].projectName,
-  unfulfilledRetryProject.name
-);
-assert.equal(unfulfilledRetryBatch.results[0].outcome, 'stopped');
-
 const projects = [
   {
     ...project('project-a', 'failed', { error: 'clone failed' }),
@@ -281,727 +210,73 @@ assert.equal(
   pendingWithoutStoredProgress.name
 );
 
-const pendingWithoutStoredProgressBatch = await prepareNextRunnerProjects(
-  { runKey: run.runKey, limit: 1 },
-  {
-    listProjects: async () => pendingWithoutStoredProgressList,
-    isWorkspacePreparationInProgress: () => false,
-    hasActiveExecutionLease: () => false,
-    prepareWorkspace: async ({ projectName }) =>
-      preparation(projectName, 'continue', true),
-  }
-);
-assert.equal(
-  pendingWithoutStoredProgressBatch.results[0].projectName,
-  pendingWithoutStoredProgress.name
-);
-assert.equal(
-  pendingWithoutStoredProgressBatch.results[0].initialStatus,
-  'pending'
-);
-assert(pendingWithoutStoredProgressBatch.requestedStatuses.includes('pending'));
-assert(
-  pendingWithoutStoredProgressBatch.requestedStatuses.includes('in_progress')
-);
-assert(pendingWithoutStoredProgressBatch.requestedStatuses.includes('failed'));
-assert(
-  pendingWithoutStoredProgressBatch.requestedStatuses.includes('mr_created')
-);
-
-const statusSelectionProjects = [
-  pendingWithoutStoredProgress,
-  {
-    ...projectWithSize('stored-pending', 1000, { ts: 1000 }),
-    progress: { status: 'pending' },
-  },
-  project('ongoing', 'in_progress'),
-  project('retry', 'pending_retry'),
-  projectWithSize('failed', 1, { ts: 1 }),
-  project('blocked', 'blocked'),
-  project('published', 'mr_created'),
-  project('dismissed', 'done', { resolution: 'dismissed' }),
-  project('merged', 'done', { resolution: 'merged' }),
-];
-const statusSelectionDependencies = {
-  ...batchDependencies(pendingWithoutStoredProgressList),
-  listProjects: async (options) =>
-    createAgenticRunProjectList(
-      {
-        check: pendingWithoutStoredProgressList.check,
-        run,
-        runs: [run],
-        projects: statusSelectionProjects,
-        total: statusSelectionProjects.length,
-        totalsByFulfillment: fulfillmentTotals({
-          fulfilled: statusSelectionProjects.length,
-        }),
-      },
-      { statuses: options.statuses }
-    ),
+const selectionRequests: any[] = [];
+const selectedNames = ['server-first', 'server-second', 'server-third'];
+const sizeRanking = {
+  metadataAvailable: false,
+  relevantExtensions: [],
+  relevantLines: null,
+  relevantFiles: null,
+  totalLines: null,
+  totalFiles: null,
 };
-const defaultStatusBatch = await prepareNextRunnerProjects(
-  { runKey: run.runKey, limit: 10 },
-  statusSelectionDependencies
-);
-assert.deepEqual(
-  defaultStatusBatch.results.map(({ projectName }) => projectName),
-  [
-    'stored-pending',
-    pendingWithoutStoredProgress.name,
-    'ongoing',
-    'published',
-    'failed',
-    'blocked',
-    'retry',
-  ]
-);
-const includeOngoingBatch = await prepareNextRunnerProjects(
-  { runKey: run.runKey, limit: 10, statuses: ['pending', 'in_progress'] },
-  statusSelectionDependencies
-);
-assert.deepEqual(
-  includeOngoingBatch.results.map(({ projectName }) => projectName).sort(),
-  [pendingWithoutStoredProgress.name, 'stored-pending', 'ongoing'].sort()
-);
-
-const pendingOnlyBatch = await prepareNextRunnerProjects(
-  { runKey: run.runKey, limit: 10, statuses: ['pending'] },
-  statusSelectionDependencies
-);
-assert.deepEqual(
-  pendingOnlyBatch.results.map(({ projectName }) => projectName),
-  ['stored-pending', pendingWithoutStoredProgress.name]
-);
-const repairsOnlyBatch = await prepareNextRunnerProjects(
-  { runKey: run.runKey, limit: 10, statuses: ['failed', 'blocked'] },
-  statusSelectionDependencies
-);
-assert.deepEqual(
-  repairsOnlyBatch.results.map(({ projectName }) => projectName),
-  ['failed', 'blocked']
-);
-const pendingFirstBatch = await prepareNextRunnerProjects(
-  { runKey: run.runKey, limit: 1 },
-  statusSelectionDependencies
-);
-assert.equal(pendingFirstBatch.results[0].projectName, 'stored-pending');
-assert.equal(pendingFirstBatch.hasMore, true);
-const startedFallback = await prepareNextRunnerProjects(
+const selection = (names: string[], hasMore = false) => ({
+  assessments: [],
+  candidates: names.map((name) => ({
+    project: project(name, 'mr_created'),
+    sizeRanking,
+  })),
+  examined: names,
+  candidatesTotal: 3,
+  hasMore,
+  requestedStatuses: ['mr_created'],
+  sourceSelection: {
+    extensions: [],
+    origin: 'total_project_fallback',
+    projectsWithSize: 0,
+    projectsWithoutSize: 3,
+  },
+});
+const selectedBatch = await prepareNextRunnerProjects(
   { runKey: run.runKey, limit: 1 },
   {
-    ...statusSelectionDependencies,
-    listProjects: async (options) => {
-      const response = await statusSelectionDependencies.listProjects(options);
-      return {
-        ...response,
-        projects: response.projects.filter(
-          (project) =>
-            project.progress?.status && project.progress.status !== 'pending'
-        ),
-      };
+    nextProjects: async (options) => {
+      selectionRequests.push(options);
+      return selectionRequests.length === 1
+        ? selection(selectedNames.slice(0, 2), true)
+        : selection(selectedNames.slice(2));
     },
-  }
+    isWorkspacePreparationInProgress: (_run, name) => name === 'server-first',
+    prepareWorkspace: async ({ projectName }) =>
+      preparation(
+        projectName,
+        projectName === 'server-second' ? 'wait' : 'continue',
+        projectName === 'server-third'
+      ),
+  } as any
 );
-assert.equal(startedFallback.results[0].projectName, 'ongoing');
-const repairFallback = await prepareNextRunnerProjects(
-  { runKey: run.runKey, limit: 1 },
-  {
-    ...statusSelectionDependencies,
-    listProjects: async (options) => {
-      const response = await statusSelectionDependencies.listProjects(options);
-      return {
-        ...response,
-        projects: response.projects.filter((project) =>
-          ['failed', 'blocked'].includes(project.progress?.status)
-        ),
-      };
-    },
-  }
-);
-assert.equal(repairFallback.results[0].projectName, 'failed');
-
-for (const reason of [
-  'waiting_for_ci',
-  'waiting_for_review',
-  'merge_request_ready',
-]) {
-  const waitingBatch = await prepareNextRunnerProjects(
-    { runKey: run.runKey, limit: 1 },
-    {
-      ...statusSelectionDependencies,
-      prepareWorkspace: async ({ projectName }) => {
-        if (projectName === 'stored-pending')
-          throw new Error('Repository unavailable');
-        if (projectName === pendingWithoutStoredProgress.name)
-          return preparation(projectName, 'stop');
-        const result = preparation(projectName, 'continue', true);
-        if (['ongoing', 'published'].includes(projectName)) {
-          Object.assign(result.projectState.progress, {
-            status: 'mr_created',
-            mergeRequestUrl:
-              'https://gitlab.example.com/group/project/-/merge_requests/3',
-            mergeRequestState: 'opened',
-            pipelineStatus: reason === 'waiting_for_ci' ? 'running' : 'success',
-            mergeRequestDetailedStatus:
-              reason === 'waiting_for_review'
-                ? 'not_approved'
-                : reason === 'merge_request_ready'
-                ? 'mergeable'
-                : 'ci_still_running',
-          });
-          result.continuation = {
-            ...result.continuation,
-            action: 'wait',
-            reason,
-          };
-          delete result.workspace;
-        }
-        return result;
-      },
-    }
-  );
-  assert.deepEqual(
-    waitingBatch.results.map(({ projectName, outcome }) => [
-      projectName,
-      outcome,
-    ]),
-    [
-      ['stored-pending', 'failed'],
-      [pendingWithoutStoredProgress.name, 'stopped'],
-      ['ongoing', 'waiting'],
-      ['published', 'waiting'],
-      ['failed', 'prepared'],
-    ]
-  );
-  assert.equal(waitingBatch.results[2].reason, reason);
-  assert.equal(waitingBatch.summary.prepared, 1);
-  assert.equal(waitingBatch.summary.waiting, 2);
-}
-
-for (const condition of ['dirty', 'rebased', 'ci_failed', 'review_changes']) {
-  const actionable = await prepareNextRunnerProjects(
-    { runKey: run.runKey, limit: 1, statuses: ['mr_created'] },
-    {
-      ...statusSelectionDependencies,
-      prepareWorkspace: async ({ projectName }) => {
-        const result = preparation(projectName, 'continue', true);
-        Object.assign(result.projectState.progress, {
-          status: 'mr_created',
-          mergeRequestUrl:
-            'https://gitlab.example.com/group/project/-/merge_requests/3',
-          mergeRequestState: 'opened',
-          pipelineStatus:
-            condition === 'ci_failed'
-              ? 'failed'
-              : condition === 'mergeable'
-              ? 'success'
-              : 'running',
-          mergeRequestDetailedStatus:
-            condition === 'review_changes'
-              ? 'requested_changes'
-              : condition === 'ci_failed'
-              ? 'not_approved'
-              : 'mergeable',
-        });
-        Object.assign(result.workspace, {
-          preparedHeadSha:
-            condition === 'rebased' ? 'new-sha' : 'published-sha',
-          recovery: { phase: 'ready_to_push', sourceHeadSha: 'published-sha' },
-        });
-        return result;
-      },
-    }
-  );
-  assert.equal(actionable.results[0].outcome, 'prepared', condition);
-}
-
-const batchCandidates = createAgenticRunProjectList(
-  {
-    check: {
-      name: 'icon-registry',
-      type: 'regex',
-      description: null,
-      agentic: true,
-      prompt: null,
-    },
-    run,
-    runs: [run],
-    projects: projects.slice(0, 3),
-    total: 3,
-    totalsByFulfillment: fulfillmentTotals({ fulfilled: 3 }),
-  },
-  { statuses: ['failed', 'blocked'] }
-);
-const batch = await prepareNextRunnerProjects(
-  { runKey: run.runKey, statuses: ['failed', 'blocked'], limit: 1 },
-  {
-    listProjects: async () => batchCandidates,
-    isWorkspacePreparationInProgress: () => false,
-    hasActiveExecutionLease: () => false,
-    prepareWorkspace: async ({ projectName }) => {
-      if (projectName === 'project-a') {
-        return preparation(projectName, 'wait');
-      }
-      if (projectName === 'project-b') {
-        throw new Error('provider unavailable');
-      }
-      return preparation(projectName, 'continue', true);
-    },
-  }
-);
-assert.equal(batch.candidatesTotal, 3);
-assert.equal(batch.examined, 3);
-assert.equal(batch.hasMore, false);
-assert.deepEqual(batch.summary, {
-  prepared: 1,
-  waiting: 1,
-  stopped: 0,
-  failed: 1,
-});
 assert.deepEqual(
-  batch.results.map(({ projectName, outcome }) => [projectName, outcome]),
+  selectedBatch.results.map((result) => [result.projectName, result.outcome]),
   [
-    ['project-a', 'waiting'],
-    ['project-b', 'failed'],
-    ['project-c', 'prepared'],
+    ['server-first', 'waiting'],
+    ['server-second', 'waiting'],
+    ['server-third', 'prepared'],
   ]
 );
-
-const sizedProjects = [
-  sizedProject('project-small-total', 100, 80),
-  sizedProject('project-small-json', 1_000, 10),
-  sizedProject('project-large-json', 5_000, 40),
-  project('project-size-unknown', 'failed'),
-];
-const sizedCandidates = createAgenticRunProjectList(
-  {
-    check: {
-      name: 'json-registry',
-      type: 'regex',
-      description: 'Update the generated JSON registry.',
-      agentic: true,
-      prompt: 'Update registry.json across matching projects.',
-    },
-    run: {
-      ...run,
-      checkName: 'json-registry',
-      prompt: 'Update registry.json across matching projects.',
-    },
-    runs: [run],
-    projects: sizedProjects,
-    total: sizedProjects.length,
-    totalsByFulfillment: fulfillmentTotals({
-      fulfilled: sizedProjects.length,
-    }),
-  },
-  { statuses: ['failed'] }
-);
-const rankedBatch = await prepareNextRunnerProjects(
-  {
-    runKey: run.runKey,
-    statuses: ['failed'],
-    limit: 4,
-    relevantSourceExtensions: ['.JSON'],
-  },
-  {
-    listProjects: async () => sizedCandidates,
-    isWorkspacePreparationInProgress: () => false,
-    hasActiveExecutionLease: () => false,
-    prepareWorkspace: async ({ projectName }) =>
-      preparation(projectName, 'continue', true),
-  }
-);
-assert.deepEqual(rankedBatch.sourceSelection, {
-  extensions: ['json'],
-  origin: 'explicit',
-  projectsWithSize: 3,
-  projectsWithoutSize: 1,
-});
-assert.deepEqual(
-  rankedBatch.results.map(({ projectName }) => projectName),
-  [
-    'project-small-total',
-    'project-small-json',
-    'project-large-json',
-    'project-size-unknown',
-  ]
-);
-assert.deepEqual(rankedBatch.results[0].sizeRanking, {
-  metadataAvailable: true,
-  relevantExtensions: ['json'],
-  relevantLines: 80,
-  relevantFiles: 1,
-  totalLines: 100,
-  totalFiles: 100,
-});
-
-const sourceSizedProjects = [
-  projectWithSizeBreakdown('project-small-source', 10, 10, 10_000),
-  projectWithSizeBreakdown('project-large-source', 100, 1, 0),
-];
-const sourceSizedCandidates = createAgenticRunProjectList(
-  {
-    check: {
-      name: 'typescript-migration',
-      type: 'regex',
-      description: 'Update TypeScript source.',
-      agentic: true,
-      prompt: 'Update TypeScript source.',
-    },
-    run: {
-      ...run,
-      checkName: 'typescript-migration',
-      prompt: 'Update TypeScript source.',
-    },
-    runs: [run],
-    projects: sourceSizedProjects,
-    total: sourceSizedProjects.length,
-    totalsByFulfillment: fulfillmentTotals({
-      fulfilled: sourceSizedProjects.length,
-    }),
-  },
-  { statuses: ['failed'] }
-);
-const sourceRankedBatch = await prepareNextRunnerProjects(
-  {
-    runKey: run.runKey,
-    statuses: ['failed'],
-    limit: 2,
-    relevantSourceExtensions: ['ts'],
-  },
-  batchDependencies(sourceSizedCandidates)
-);
-assert.deepEqual(
-  sourceRankedBatch.results.map(({ projectName }) => projectName),
-  ['project-small-source', 'project-large-source']
-);
-assert.deepEqual(sourceRankedBatch.results[0].sizeRanking, {
-  metadataAvailable: true,
-  relevantExtensions: ['ts'],
-  relevantLines: 10,
-  relevantFiles: 1,
-  totalLines: 10,
-  totalFiles: 2,
-});
-
-const inferredRankedBatch = await prepareNextRunnerProjects(
-  { runKey: run.runKey, statuses: ['failed'], limit: 1 },
-  {
-    listProjects: async () => sizedCandidates,
-    isWorkspacePreparationInProgress: () => false,
-    hasActiveExecutionLease: () => false,
-    prepareWorkspace: async ({ projectName }) =>
-      preparation(projectName, 'continue', true),
-  }
-);
-assert.deepEqual(inferredRankedBatch.sourceSelection.extensions, ['json']);
-assert.equal(inferredRankedBatch.sourceSelection.origin, 'prompt_and_results');
-assert.equal(inferredRankedBatch.results[0].projectName, 'project-small-total');
-
-const multiDotProjects = [
-  sizedProject('project-few-typescript-lines', 1_000, 990),
-  sizedProject('project-small-overall', 100, 10),
-];
-const multiDotCandidates = createAgenticRunProjectList(
-  {
-    check: {
-      name: 'component-migration',
-      type: 'regex',
-      description: 'Update the selected component source file.',
-      agentic: true,
-      prompt: 'Update src/app.component.ts across matching projects.',
-    },
-    run: {
-      ...run,
-      checkName: 'component-migration',
-      prompt: 'Update src/app.component.ts across matching projects.',
-    },
-    runs: [run],
-    projects: multiDotProjects,
-    total: multiDotProjects.length,
-    totalsByFulfillment: fulfillmentTotals({
-      fulfilled: multiDotProjects.length,
-    }),
-  },
-  { statuses: ['failed'] }
-);
-const multiDotRankedBatch = await prepareNextRunnerProjects(
-  { runKey: run.runKey, statuses: ['failed'], limit: 1 },
-  {
-    listProjects: async () => multiDotCandidates,
-    isWorkspacePreparationInProgress: () => false,
-    hasActiveExecutionLease: () => false,
-    prepareWorkspace: async ({ projectName }) =>
-      preparation(projectName, 'continue', true),
-  }
-);
-assert.deepEqual(multiDotRankedBatch.sourceSelection.extensions, ['ts']);
-assert.equal(
-  multiDotRankedBatch.results[0].projectName,
-  'project-small-overall'
-);
-
-const projectLocalResultProjects = [
-  {
-    ...projectWithSize('project-json-result', 1_010, {
-      json: 10,
-      ts: 1_000,
-    }),
-    result: { files: ['config.json'] },
-  },
-  {
-    ...projectWithSize('project-typescript-result', 20, { ts: 20 }),
-    result: { files: ['src/main.ts'] },
-  },
-];
-const projectLocalResultBatch = await prepareNextRunnerProjects(
-  { runKey: run.runKey, statuses: ['failed'], limit: 2 },
-  batchDependencies(
-    candidatesWithPrompt(
-      'Apply the matched change.',
-      projectLocalResultProjects
-    )
-  )
-);
-assert.deepEqual(projectLocalResultBatch.sourceSelection.extensions, [
-  'json',
-  'ts',
+assert.deepEqual(selectionRequests[1].excludeProjectNames, [
+  'server-first',
+  'server-second',
 ]);
-assert.deepEqual(
-  projectLocalResultBatch.results.map(({ projectName, sizeRanking }) => [
-    projectName,
-    sizeRanking.relevantExtensions,
-    sizeRanking.relevantLines,
-  ]),
-  [
-    ['project-typescript-result', ['ts'], 20],
-    ['project-json-result', ['json'], 10],
-  ]
-);
-
-const uppercaseResultProjects = [
-  {
-    ...projectWithSize('project-uppercase-typescript', 1_000, {
-      ts: 10,
-      json: 990,
-    }),
-    result: { files: ['src/App.TS'] },
+assert.equal(selectedBatch.summary.prepared, 1);
+assert.equal(selectedBatch.hasMore, false);
+const emptyBatch = await prepareNextRunnerProjects({ runKey: run.runKey }, {
+  nextProjects: async () => selection([]),
+  isWorkspacePreparationInProgress: () => false,
+  prepareWorkspace: async () => {
+    throw new Error('No server-authorized candidate');
   },
-  {
-    ...projectWithSize('project-small-uppercase-fallback', 100, { json: 100 }),
-    result: {},
-  },
-];
-const uppercaseResultBatch = await prepareNextRunnerProjects(
-  { runKey: run.runKey, statuses: ['failed'], limit: 1 },
-  batchDependencies(
-    candidatesWithPrompt('Apply the matched change.', uppercaseResultProjects)
-  )
-);
-assert.deepEqual(uppercaseResultBatch.sourceSelection.extensions, ['ts']);
-assert.equal(
-  uppercaseResultBatch.results[0].projectName,
-  'project-small-uppercase-fallback'
-);
-assert.deepEqual(
-  uppercaseResultBatch.results[0].sizeRanking.relevantExtensions,
-  ['json']
-);
-assert.equal(uppercaseResultBatch.results[0].sizeRanking.relevantLines, 100);
-
-const profileOnlyProjects = [
-  {
-    ...projectWithSize('project-large-profile', 1_000, { ts: 1_000 }),
-    result: { profile: 'docs/config.json' },
-  },
-  {
-    ...projectWithSize('project-small-fallback', 100, { json: 100 }),
-    result: {},
-  },
-];
-const profileOnlyBatch = await prepareNextRunnerProjects(
-  { runKey: run.runKey, statuses: ['failed'], limit: 1 },
-  batchDependencies(
-    candidatesWithPrompt('Apply the matched change.', profileOnlyProjects)
-  )
-);
-assert.deepEqual(profileOnlyBatch.sourceSelection.extensions, []);
-assert.equal(profileOnlyBatch.sourceSelection.origin, 'total_project_fallback');
-assert.equal(profileOnlyBatch.results[0].projectName, 'project-small-fallback');
-
-const nestedFileProjects = [
-  {
-    ...projectWithSize('project-nested-typescript', 1_000, {
-      ts: 10,
-      json: 990,
-    }),
-    result: { files: { matched: ['src/main.ts'] } },
-  },
-  {
-    ...projectWithSize('project-small-nested-fallback', 100, { json: 100 }),
-    result: {},
-  },
-];
-const nestedFileBatch = await prepareNextRunnerProjects(
-  { runKey: run.runKey, statuses: ['failed'], limit: 1 },
-  batchDependencies(
-    candidatesWithPrompt('Apply the matched change.', nestedFileProjects)
-  )
-);
-assert.deepEqual(nestedFileBatch.sourceSelection.extensions, ['ts']);
-assert.equal(
-  nestedFileBatch.results[0].projectName,
-  'project-small-nested-fallback'
-);
-
-const inferenceEdgeProjects = [
-  projectWithSize('project-few-json-lines', 1_000, {
-    json: 10,
-    go: 990,
-  }),
-  projectWithSize('project-more-json-lines', 100, {
-    json: 20,
-    com: 80,
-  }),
-];
-const imperativeGoBatch = await prepareNextRunnerProjects(
-  { runKey: run.runKey, statuses: ['failed'], limit: 1 },
-  batchDependencies(
-    candidatesWithPrompt(
-      'Go update registry.json in every project.',
-      inferenceEdgeProjects
-    )
-  )
-);
-assert.deepEqual(imperativeGoBatch.sourceSelection.extensions, ['json']);
-assert.equal(
-  imperativeGoBatch.results[0].projectName,
-  'project-more-json-lines'
-);
-
-const urlOnlyBatch = await prepareNextRunnerProjects(
-  { runKey: run.runKey, statuses: ['failed'], limit: 1 },
-  batchDependencies(
-    candidatesWithPrompt(
-      'Follow https://example.com/migration before updating the projects.',
-      inferenceEdgeProjects
-    )
-  )
-);
-assert.deepEqual(urlOnlyBatch.sourceSelection.extensions, []);
-assert.equal(urlOnlyBatch.sourceSelection.origin, 'total_project_fallback');
-assert.equal(urlOnlyBatch.results[0].projectName, 'project-more-json-lines');
-
-const urlPathBatch = await prepareNextRunnerProjects(
-  { runKey: run.runKey, statuses: ['failed'], limit: 1 },
-  batchDependencies(
-    candidatesWithPrompt(
-      'Update https://example.com/src/app.component.ts in every project.',
-      multiDotProjects
-    )
-  )
-);
-assert.deepEqual(urlPathBatch.sourceSelection.extensions, ['ts']);
-assert.equal(urlPathBatch.results[0].projectName, 'project-small-overall');
-
-let invalidExplicitPreparationStarted = false;
-await assert.rejects(
-  prepareNextRunnerProjects(
-    {
-      runKey: run.runKey,
-      statuses: ['failed'],
-      limit: 1,
-      relevantSourceExtensions: ['.'],
-    },
-    {
-      ...batchDependencies(sizedCandidates),
-      prepareWorkspace: async ({ projectName }) => {
-        invalidExplicitPreparationStarted = true;
-        return preparation(projectName, 'continue', true);
-      },
-    }
-  ),
-  /Relevant source extensions must contain only valid file extensions/
-);
-assert.equal(invalidExplicitPreparationStarted, false);
-
-const preparationsInProgress = new Set<string>();
-const activeExecutionLeases = new Set<string>();
-let signalFirstPreparationStarted!: () => void;
-let releaseFirstPreparation!: () => void;
-const firstPreparationStarted = new Promise<void>((resolve) => {
-  signalFirstPreparationStarted = resolve;
-});
-const firstPreparationRelease = new Promise<void>((resolve) => {
-  releaseFirstPreparation = resolve;
-});
-const concurrentDependencies = {
-  listProjects: async () => batchCandidates,
-  isWorkspacePreparationInProgress: (_runKey: string, projectName: string) =>
-    preparationsInProgress.has(projectName),
-  hasActiveExecutionLease: (_runKey: string, projectName: string) =>
-    activeExecutionLeases.has(projectName),
-  prepareWorkspace: async ({ projectName }) => {
-    preparationsInProgress.add(projectName);
-    try {
-      if (projectName === 'project-a') {
-        signalFirstPreparationStarted();
-        await firstPreparationRelease;
-      }
-      activeExecutionLeases.add(projectName);
-      return preparation(projectName, 'continue', true);
-    } finally {
-      preparationsInProgress.delete(projectName);
-    }
-  },
-};
-const firstConcurrentBatch = prepareNextRunnerProjects(
-  { runKey: run.runKey, statuses: ['failed', 'blocked'], limit: 1 },
-  concurrentDependencies
-);
-await firstPreparationStarted;
-const secondConcurrentBatch = await prepareNextRunnerProjects(
-  { runKey: run.runKey, statuses: ['failed', 'blocked'], limit: 1 },
-  concurrentDependencies
-);
-releaseFirstPreparation();
-const completedFirstConcurrentBatch = await firstConcurrentBatch;
-assert.deepEqual(
-  completedFirstConcurrentBatch.results.map(({ projectName, outcome }) => [
-    projectName,
-    outcome,
-  ]),
-  [['project-a', 'prepared']]
-);
-assert.deepEqual(
-  secondConcurrentBatch.results.map(({ projectName, outcome, reason }) => [
-    projectName,
-    outcome,
-    reason ?? null,
-  ]),
-  [
-    ['project-a', 'waiting', 'preparation_in_progress'],
-    ['project-b', 'prepared', null],
-  ]
-);
-assert.deepEqual(secondConcurrentBatch.summary, {
-  prepared: 1,
-  waiting: 1,
-  stopped: 0,
-  failed: 0,
-});
-const staleOverlappingBatch = await prepareNextRunnerProjects(
-  { runKey: run.runKey, statuses: ['failed', 'blocked'], limit: 1 },
-  concurrentDependencies
-);
-assert.deepEqual(
-  staleOverlappingBatch.results.map(({ projectName, outcome, reason }) => [
-    projectName,
-    outcome,
-    reason ?? null,
-  ]),
-  [['project-a', 'prepared', null]]
-);
+} as any);
+assert.equal(emptyBatch.results.length, 0);
 
 const apiResponse = {
   check: {
@@ -1356,109 +631,17 @@ function project(name, status, progress = {}, fulfillment = 'fulfilled') {
     targetedByRun: true,
     repositoryUrl: `https://gitlab.example.com/group/${name}.git`,
     progress: {
+      workflow: {
+        outcome: 'actionable',
+        nextAction: 'prepare',
+        maintenance: [],
+        reason: 'active_work',
+        instruction: 'Server instruction',
+      },
       status,
       ...progress,
     },
   };
-}
-
-function sizedProject(name, totalLines, jsonLines) {
-  return {
-    ...project(name, 'failed'),
-    projectSize: {
-      totalFiles: 100,
-      totalLines,
-      byExtension: {
-        json: 1,
-        ts: 99,
-      },
-      linesByExtension: {
-        json: jsonLines,
-        ts: totalLines - jsonLines,
-      },
-    },
-  };
-}
-
-function projectWithSizeBreakdown(
-  name,
-  sourceLines,
-  typescriptLines,
-  otherLines
-) {
-  return {
-    ...project(name, 'failed'),
-    projectSize: {
-      totalFiles: otherLines > 0 ? 3 : 2,
-      totalLines: sourceLines + otherLines,
-      byExtension: {
-        ts: 1,
-        html: 1,
-        ...(otherLines > 0 ? { json: 1 } : {}),
-      },
-      linesByExtension: {
-        ts: typescriptLines,
-        html: sourceLines - typescriptLines,
-        ...(otherLines > 0 ? { json: otherLines } : {}),
-      },
-      breakdownVersion: 1,
-      source: {
-        totalFiles: 2,
-        totalLines: sourceLines,
-        byExtension: { ts: 1, html: 1 },
-        linesByExtension: {
-          ts: typescriptLines,
-          html: sourceLines - typescriptLines,
-        },
-      },
-      others: {
-        totalFiles: otherLines > 0 ? 1 : 0,
-        totalLines: otherLines,
-        byExtension: otherLines > 0 ? { json: 1 } : {},
-        linesByExtension: otherLines > 0 ? { json: otherLines } : {},
-      },
-    },
-  };
-}
-
-function projectWithSize(name, totalLines, linesByExtension) {
-  return {
-    ...project(name, 'failed'),
-    projectSize: {
-      totalFiles: Object.keys(linesByExtension).length,
-      totalLines,
-      byExtension: Object.fromEntries(
-        Object.keys(linesByExtension).map((extension) => [extension, 1])
-      ),
-      linesByExtension,
-    },
-  };
-}
-
-function candidatesWithPrompt(prompt, candidateProjects) {
-  return createAgenticRunProjectList(
-    {
-      check: {
-        name: 'source-inference',
-        type: 'regex',
-        description: null,
-        agentic: true,
-        prompt,
-      },
-      run: {
-        ...run,
-        checkName: 'source-inference',
-        prompt,
-      },
-      runs: [run],
-      projects: candidateProjects,
-      total: candidateProjects.length,
-      totalsByFulfillment: fulfillmentTotals({
-        fulfilled: candidateProjects.length,
-      }),
-    },
-    { statuses: ['failed'] }
-  );
 }
 
 function fulfillmentTotals(overrides = {}) {
@@ -1467,16 +650,6 @@ function fulfillmentTotals(overrides = {}) {
     unfulfilled: 0,
     unchecked: 0,
     ...overrides,
-  };
-}
-
-function batchDependencies(candidates) {
-  return {
-    listProjects: async () => candidates,
-    isWorkspacePreparationInProgress: () => false,
-    hasActiveExecutionLease: () => false,
-    prepareWorkspace: async ({ projectName }) =>
-      preparation(projectName, 'continue', true),
   };
 }
 
