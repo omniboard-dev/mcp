@@ -21,6 +21,20 @@ run with its `runKey`.
 The MCP server sends its prime directive to the coding client during initialization:
 deliver the requested migration until an open, green, mergeable MR exists. Use that goal
 to resolve ambiguous next steps within the user's scope and constraints.
+Before publication, run all applicable local build, lint, unit-test and end-to-end
+checks using the project's existing commands. A failing check starts a repair loop:
+read its output, fix migration-related code or tests, rerun the failing check, then
+rerun all applicable checks until they pass. Preserve coverage and keep checks
+enabled with their assertions intact. Run analyzer validation separately when available.
+Once all applicable checks pass, finalize the workspace and publish the MR.
+When a sandbox or permission restriction prevents a check from running, rerun the
+same check through the coding client's approval flow when available. If access
+remains unavailable, report the concrete blocker and leave publication pending.
+Keep reporting implementation progress while diagnosing and repairing failed checks.
+Use `failed`, `blocked` or `needs_input` when work needs external action or a scope
+decision, and include the concrete blocker,
+commands and failure evidence, attempted repairs, and the exact action needed to resume.
+Report unrelated failures separately for a scope decision.
 After publication, wait for running CI and repair failed CI or conflicts. Once
 the MR is green and mergeable, no further agent work remains. Merging belongs to
 the user or consuming team. Recover disposable runner state and closed MRs as needed. Duplicate effort

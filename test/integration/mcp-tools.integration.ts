@@ -403,6 +403,17 @@ try {
   assert(instructions);
   assert.match(instructions, /Prime directive.*open, green, mergeable MR/);
   assert.match(instructions, /Never merge it automatically/);
+  assert.match(instructions, /build, lint, unit-test and end-to-end checks/);
+  assert.match(instructions, /Repeat repair and rerun until the check passes/);
+  assert.match(instructions, /Once all applicable local checks have passed/);
+  assert.match(
+    instructions,
+    /keep applicable checks enabled with their assertions intact/
+  );
+  assert.match(
+    instructions,
+    /While checks are failing, continue the repair loop in the same workspace/
+  );
   assert.match(
     instructions,
     /pending work, then started\/published work, then failed\/blocked\/retry work/
@@ -429,6 +440,22 @@ try {
     /old local test results do not validate a newly assembled remote commit/
   );
   const { tools } = await client.listTools();
+  const localChecksFinalizeTool = tools.find(
+    (tool) => tool.name === 'omniboard_runner_finalize_agentic_run_workspace'
+  );
+  assert(localChecksFinalizeTool);
+  assert.match(
+    localChecksFinalizeTool.description,
+    /Once all applicable local build, lint, unit-test and end-to-end checks pass/
+  );
+  const reportTool = tools.find(
+    (tool) => tool.name === 'omniboard_runner_report_agentic_run_progress'
+  );
+  assert(reportTool);
+  assert.match(
+    JSON.stringify(reportTool.inputSchema),
+    /Keep reporting implementation progress while diagnosing/
+  );
   const names = tools.map((tool) => tool.name);
   assert(names.includes('omniboard_runner_list_agentic_runs'));
   assert(names.includes('omniboard_runner_list_agentic_run_projects'));

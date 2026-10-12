@@ -27,6 +27,11 @@ export async function runSimpleFlowIntegration(context: any) {
   };
   const first = await prepareRunnerWorkspace(options);
   assert(first.workspace);
+  assert.match(
+    first.instructions.join(' '),
+    /Repeat repair and rerun until the check passes/
+  );
+  assert.match(first.instructions.join(' '), /end-to-end checks/);
   const localPath = first.workspace.localPath;
   assert.equal(
     await git(localPath, 'branch', '--show-current'),

@@ -1,5 +1,6 @@
 import path from 'node:path';
 import {
+  AGENTIC_RUN_LOCAL_VERIFICATION_INSTRUCTIONS,
   getAgenticRunContinuationDecision,
   workflowContinuation,
 } from './agentic-run-continuation.service.js';
@@ -267,6 +268,7 @@ async function prepare({
       'Work in ' +
         localPath +
         '. Apply the run prompt; resolve conflicts and pipeline failures, then run the relevant project checks.',
+      ...AGENTIC_RUN_LOCAL_VERIFICATION_INSTRUCTIONS,
       ...(state.recovery
         ? createRecoveryWorkspaceInstructions(
             runKey,

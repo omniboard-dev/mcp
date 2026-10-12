@@ -11,7 +11,11 @@ import { McpCliToolDefinition } from '../shared.js';
 export const runnerProgressInputSchema = {
   runKey: z.string().min(1),
   projectName: z.string().min(1),
-  status: z.enum(AGENTIC_RUN_REPORTABLE_PROGRESS_STATUS_VALUES),
+  status: z
+    .enum(AGENTIC_RUN_REPORTABLE_PROGRESS_STATUS_VALUES)
+    .describe(
+      'Keep reporting implementation progress while diagnosing, repairing and rerunning failed local checks. Use failed/blocked/needs_input when progress requires external action or a scope decision; include failure evidence, repairs attempted and the exact action needed to resume.'
+    ),
   resolution: z.enum(AGENTIC_RUN_RESOLUTION_VALUES).nullable().optional(),
   resolutionReason: z.string().min(1).max(255).nullable().optional(),
   repositoryUrl: z.string().min(1).max(1024).optional(),

@@ -17,7 +17,10 @@ import {
   RunnerAgenticRunsResponse,
 } from '../interface.js';
 import * as api from './api.service.js';
-import { getAgenticRunContinuationDecision } from './agentic-run-continuation.service.js';
+import {
+  AGENTIC_RUN_LOCAL_VERIFICATION_INSTRUCTIONS,
+  getAgenticRunContinuationDecision,
+} from './agentic-run-continuation.service.js';
 import { getOmniboardProject } from './omniboard-context.service.js';
 import { retryFailedPipeline } from './source-control.service.js';
 
@@ -408,7 +411,7 @@ export function createAgenticRunAgentContext(
       'Inspect the local codebase before editing and make the smallest coherent change that resolves the agentic check.',
       `Report meaningful progress with \`omniboard_local_report_agentic_run_progress\` using runKey "${run.runKey}" when work is implemented, needs input, verified, committed, pushed, MR created, done with a resolution, blocked, or failed.`,
       'If investigation concludes that no code change is required—for example, the finding is a false positive, expected usage, generated code, or the checked library\'s own implementation—report status "done", resolution "dismissed", and a concise resolutionReason such as "false_positive"; do not leave the project at "verified".',
-      'After changing the code, run the relevant project build, test, or lint command when available.',
+      ...AGENTIC_RUN_LOCAL_VERIFICATION_INSTRUCTIONS,
       `If \`OMNIBOARD_API_KEY\` is available, optionally run \`omniboard_local_validate_agentic_run\` with runKey "${run.runKey}" to confirm whether the check still matches.`,
       'If `OMNIBOARD_API_KEY` is not available, skip analyzer validation and report that it was skipped.',
     ],

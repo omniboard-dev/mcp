@@ -23,6 +23,7 @@ import { reportAgenticRunProgressTool } from './mcp/tools/report-agentic-run-pro
 import { reportRunnerAgenticRunProgressTool } from './mcp/tools/report-runner-agentic-run-progress.tool.js';
 import { validateAgenticRunTool } from './mcp/tools/validate-agentic-run.tool.js';
 import { releaseAllRunnerExecutions } from './services/runner-execution.service.js';
+import { AGENTIC_RUN_LOCAL_VERIFICATION_INSTRUCTIONS } from './services/agentic-run-continuation.service.js';
 
 const mcpCliServer = new McpCliSdkServer(
   {
@@ -32,6 +33,7 @@ const mcpCliServer = new McpCliSdkServer(
   {
     instructions: [
       "Prime directive for agentic migrations: deliver the requested change until an open, green, mergeable MR exists. Within the user's scope and constraints, use this goal to resolve ambiguous next steps. After publication, repair failed CI or conflicts until the MR is green and mergeable. Never merge it automatically.",
+      ...AGENTIC_RUN_LOCAL_VERIFICATION_INSTRUCTIONS,
       'Use the four workflow outcomes returned by preparation: complete and dismissed stop, waiting moves to another project, actionable permits work. Dismissed migrations require an explicit retry; local files and progress labels never override terminal outcomes.',
       'For continue or next-N requests, use omniboard_runner_prepare_next_agentic_run_projects without statuses: it prioritizes pending work, then started/published work, then failed/blocked/retry work. Explicit user status filters override that default. Finish each selected migration through implementation, checks, publication and CI or conflict repair; do not abandon it just because preparation changed its status.',
       'Resume work only after preparation returns actionable; inspect and complete the migration before finalization. For an open MR, inspect CI and review feedback, repair actionable failures, then wait once it is green and mergeable. Running CI also waits. Conflicts require rebasing onto the target branch, validation and publication. Merging belongs to the user or consuming team.',

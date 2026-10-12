@@ -4,6 +4,14 @@ import {
   AgenticRunWorkflowDecision,
 } from '../interface.js';
 
+export const AGENTIC_RUN_LOCAL_VERIFICATION_INSTRUCTIONS = [
+  'Inspect the project scripts and documented validation commands. Run all applicable local build, lint, unit-test and end-to-end checks using the existing project commands, and record the commands and results. Run analyzer validation separately when available.',
+  'When a local check fails, inspect its output, identify the cause, repair migration-related code or tests, and rerun that check. Repeat repair and rerun until the check passes, then rerun all applicable checks before finalizing.',
+  'Once all applicable local checks have passed, finalize the workspace, push the branch and create or update the MR. While checks are failing, continue the repair loop in the same workspace. When a sandbox or permission restriction prevents a check from running, use the coding client approval flow to rerun the same check with the required access. If access remains unavailable, report the concrete blocker and leave publication pending.',
+  'Keep repairs within the requested migration. Preserve test coverage and keep applicable checks enabled with their assertions intact. Report unrelated failures separately for a scope decision.',
+  'Keep reporting implementation progress while diagnosing and repairing local check failures. Use failed, blocked or needs_input when progress requires external action or a decision outside the authorized scope; include the commands and failure evidence, repairs attempted, and the exact action needed to resume.',
+];
+
 export function getAgenticRunContinuationDecision(
   projectState: AgenticRunProjectState
 ): AgenticRunContinuationDecision {
